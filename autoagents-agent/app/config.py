@@ -47,7 +47,9 @@ ADMIN_EMAILS = [
     e.strip().lower()
     for e in os.environ.get(
         "ADMIN_EMAILS", "shahirshamim15314@gmail.com,jmkntech@gmail.com"
-    ).split(",")
+    )
+    .replace(";", ",")
+    .split(",")
     if e.strip()
 ]
 

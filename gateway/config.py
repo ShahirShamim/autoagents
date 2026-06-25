@@ -19,6 +19,11 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 # Svix signing secret for Resend inbound webhooks (whsec_...).
 RESEND_WEBHOOK_SECRET = os.environ.get("RESEND_WEBHOOK_SECRET", "")
 
+# Shared secret Cloud Scheduler sends in the X-Tasks-Token header to authorise
+# /tasks/run (the service is public for the Resend webhook, so this gates the
+# scheduler endpoint).
+TASKS_TOKEN = os.environ.get("TASKS_TOKEN", "")
+
 # Agent Runtime resource name, e.g.
 # projects/<num>/locations/us-central1/reasoningEngines/<id>
 # Set after `agents-cli deploy`.
@@ -29,7 +34,9 @@ ADMIN_EMAILS = [
     e.strip().lower()
     for e in os.environ.get(
         "ADMIN_EMAILS", "shahirshamim15314@gmail.com,jmkntech@gmail.com"
-    ).split(",")
+    )
+    .replace(";", ",")
+    .split(",")
     if e.strip()
 ]
 

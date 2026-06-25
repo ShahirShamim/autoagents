@@ -39,6 +39,9 @@ lint = [
     "ty>=0.0.1a0",
     "codespell>=2.2.0,<3.0.0",
 ]
+mcp = [
+    "mcp>=1.2",
+]
 
 [tool.ruff]
 line-length = 88

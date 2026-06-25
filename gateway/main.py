@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 import requests
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 
 from gateway import clients, config
 
@@ -57,23 +57,38 @@ def _verify_webhook(raw: bytes, headers: dict[str, str]) -> bool:
         return False
 
 
-def _store_attachments(data: dict[str, Any]) -> list[dict[str, str]]:
-    """Persist inbound attachments to GCS; return list of {name, uri, type}."""
+# Mime types Gemini can read directly as multimodal input.
+def _model_supported(mime: str) -> bool:
+    return mime == "application/pdf" or mime.startswith(
+        ("image/", "audio/", "video/", "text/")
+    )
+
+
+def _store_attachments(email_id: str) -> list[dict[str, str]]:
+    """Fetch the inbound email's attachments via Resend (list endpoint gives a
+    download_url per file), download the bytes, store in GCS, and return
+    [{name, uri, type}].
+    """
     out: list[dict[str, str]] = []
-    for att in data.get("attachments", []) or []:
-        name = att.get("filename") or att.get("name") or "attachment"
-        ctype = att.get("content_type") or att.get("contentType") or "application/octet-stream"
+    if not email_id:
+        return out
+    for a in clients.list_inbound_attachments(email_id):
+        name = a.get("filename") or a.get("name") or "attachment"
+        ctype = (
+            a.get("content_type") or a.get("contentType") or "application/octet-stream"
+        )
+        url = a.get("download_url") or a.get("url")
         content: bytes | None = None
-        if att.get("content"):  # base64 inline
+        if url:
             try:
-                content = base64.b64decode(att["content"])
-            except Exception:  # noqa: BLE001
-                content = None
-        elif att.get("url"):  # fetch by URL
-            try:
-                r = requests.get(att["url"], timeout=30)
+                r = requests.get(url, timeout=60)
                 if r.ok:
                     content = r.content
+            except Exception:  # noqa: BLE001
+                content = None
+        elif a.get("content"):
+            try:
+                content = base64.b64decode(a["content"])
             except Exception:  # noqa: BLE001
                 content = None
         if content:
@@ -106,8 +121,8 @@ def _handle_admin(sender: str, text: str) -> str | None:
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
-@app.get("/healthz")
-def healthz() -> dict[str, str]:
+@app.get("/health")
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
@@ -131,10 +146,25 @@ async def inbound_email(request: Request) -> Response:
         log.info("ignoring non-inbound event: %s", etype)
         return Response(status_code=200, content="ignored")
 
-    sender = _as_email(data.get("from"))
-    subject = data.get("subject", "") or ""
-    text = data.get("text") or data.get("html") or ""
-    attachments = _store_attachments(data)
+    # Resend's email.received webhook carries metadata only — fetch the full
+    # email (body + attachments) by id. Verify the retrieve path against a real
+    # payload once inbound DNS is live.
+    email_id = data.get("email_id") or data.get("id") or ""
+    full = clients.fetch_inbound_email(email_id) if email_id else {}
+    if "received" in etype and not full.get("id"):
+        # Webhook id wasn't a retrievable inbound id — fall back to most recent.
+        email_id = clients.latest_inbound_id()
+        full = clients.fetch_inbound_email(email_id) if email_id else {}
+    src = full or data
+    log.info(
+        "inbound email_id=%s full=%s payload_keys=%s data_keys=%s",
+        email_id, bool(full.get("id")), list(payload.keys()), list(data.keys()),
+    )
+
+    sender = _as_email(src.get("from") or data.get("from"))
+    subject = src.get("subject") or data.get("subject") or ""
+    text = src.get("text") or src.get("html") or data.get("text") or ""
+    attachments = _store_attachments(email_id)
 
     session_id = ""  # set below when we query the agent
     clients.log_message(
@@ -168,15 +198,24 @@ async def inbound_email(request: Request) -> Response:
         )
         return Response(status_code=200, content="paused")
 
-    # Hand to the agent.
-    prompt = text
-    if attachments:
-        refs = "\n".join(f"- {a['name']} ({a['type']}): {a['uri']}" for a in attachments)
-        prompt = f"{text}\n\n[Attachments stored in GCS]\n{refs}"
+    # Hand to the agent. Media Gemini can read goes in as file_data parts;
+    # anything else is mentioned by reference so the agent at least knows of it.
+    files = [
+        {"uri": a["uri"], "type": a["type"]}
+        for a in attachments
+        if _model_supported(a["type"])
+    ]
+    prompt = text or "(no text body)"
+    other = [a for a in attachments if not _model_supported(a["type"])]
+    if other:
+        refs = "\n".join(f"- {a['name']} ({a['type']}): {a['uri']}" for a in other)
+        prompt = f"{prompt}\n\n[Attachments stored but not directly readable]\n{refs}"
 
     try:
         session_id = clients.ensure_session(sender)
-        reply = clients.query_agent(user_id=sender, session_id=session_id, message=prompt)
+        reply = clients.query_agent(
+            user_id=sender, session_id=session_id, message=prompt, files=files
+        )
     except Exception as exc:  # noqa: BLE001
         log.exception("agent query failed")
         reply = f"(sorry, I hit an error processing that: {exc})"
@@ -188,6 +227,8 @@ async def inbound_email(request: Request) -> Response:
 @app.post("/tasks/run")
 async def tasks_run(request: Request) -> dict[str, Any]:
     """Scheduler tick: execute any due tasks/reminders/followups."""
+    if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
+        raise HTTPException(status_code=401, detail="unauthorized")
     if clients.get_agent_status() != "running":
         return {"ran": 0, "skipped": "agent not running"}
 

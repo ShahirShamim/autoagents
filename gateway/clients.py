@@ -153,14 +153,91 @@ def send_email(to: str, subject: str, body: str) -> dict[str, Any]:
     return {"ok": ok, "id": data.get("id", ""), "raw": data}
 
 
+def fetch_inbound_email(email_id: str) -> dict[str, Any]:
+    """Fetch a received (inbound) email's full content by id.
+
+    Resend's email.received webhook is metadata-only; the body + attachments
+    come from this endpoint. Path mirrors the `resend emails receiving get` CLI
+    command — verify against a real payload when inbound DNS goes live.
+    """
+    if not (config.RESEND_API_KEY and email_id):
+        return {}
+    try:
+        r = requests.get(
+            f"https://api.resend.com/emails/receiving/{email_id}",
+            headers={"Authorization": f"Bearer {config.RESEND_API_KEY}"},
+            timeout=30,
+        )
+        return r.json() if r.ok else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def fetch_inbound_attachment(email_id: str, attachment_id: str) -> dict[str, Any]:
+    """Fetch a single inbound attachment (content base64 or download url) by id."""
+    if not (config.RESEND_API_KEY and email_id and attachment_id):
+        return {}
+    try:
+        r = requests.get(
+            f"https://api.resend.com/emails/receiving/{email_id}"
+            f"/attachments/{attachment_id}",
+            headers={"Authorization": f"Bearer {config.RESEND_API_KEY}"},
+            timeout=30,
+        )
+        return r.json() if r.ok else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def list_inbound_attachments(email_id: str) -> list[dict[str, Any]]:
+    """List a received email's attachments; each item includes a download_url."""
+    if not (config.RESEND_API_KEY and email_id):
+        return []
+    try:
+        r = requests.get(
+            f"https://api.resend.com/emails/receiving/{email_id}/attachments",
+            headers={"Authorization": f"Bearer {config.RESEND_API_KEY}"},
+            timeout=30,
+        )
+        if not r.ok:
+            return []
+        body = r.json()
+        items = body.get("data", body) if isinstance(body, dict) else body
+        return items if isinstance(items, list) else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def latest_inbound_id() -> str:
+    """Most recent inbound email id — fallback when the webhook id isn't usable."""
+    if not config.RESEND_API_KEY:
+        return ""
+    try:
+        r = requests.get(
+            "https://api.resend.com/emails/receiving",
+            headers={"Authorization": f"Bearer {config.RESEND_API_KEY}"},
+            timeout=30,
+        )
+        data = (r.json().get("data", []) if r.ok else []) or []
+        return data[0].get("id", "") if data else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 # --------------------------------------------------------------------------- #
 # Agent Runtime (query the deployed ADK agent)
 # --------------------------------------------------------------------------- #
-def query_agent(user_id: str, session_id: str, message: str) -> str:
-    """Send a message to the deployed Agent Runtime agent and return its text reply.
+def query_agent(
+    user_id: str,
+    session_id: str,
+    message: str,
+    files: list[dict[str, str]] | None = None,
+) -> str:
+    """Send a message (optionally with multimodal file parts) to the deployed
+    Agent Runtime agent and return its text reply.
 
-    Uses the vertexai agent_engines SDK. The exact event shape is normalised
-    defensively because it varies slightly across SDK versions.
+    files: list of {"uri": "gs://...", "type": "<mime>"} passed as file_data
+    parts so Gemini reads the media directly from Cloud Storage.
     """
     if not config.AGENT_ENGINE_RESOURCE:
         return "(agent not deployed yet: AGENT_ENGINE_RESOURCE unset)"
@@ -170,9 +247,19 @@ def query_agent(user_id: str, session_id: str, message: str) -> str:
     vertexai.init(project=config.PROJECT_ID, location=config.REGION)
     engine = agent_engines.get(config.AGENT_ENGINE_RESOURCE)
 
+    if files:
+        parts: list[dict[str, Any]] = [{"text": message}]
+        for f in files:
+            parts.append(
+                {"file_data": {"file_uri": f["uri"], "mime_type": f["type"]}}
+            )
+        outgoing: Any = {"role": "user", "parts": parts}
+    else:
+        outgoing = message
+
     chunks: list[str] = []
     for event in engine.stream_query(
-        user_id=user_id, session_id=session_id, message=message
+        user_id=user_id, session_id=session_id, message=outgoing
     ):
         ev = event if isinstance(event, dict) else getattr(event, "__dict__", {})
         content = ev.get("content") or {}

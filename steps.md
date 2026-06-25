@@ -48,8 +48,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs use
 - [x] RAG tools `search_documents` + `ingest_document` — verified live (ingested sample PDF, retrieved by query)
 - [x] **Memory Bank** wired natively: `PreloadMemoryTool()` + `after_agent_callback=add_session_to_memory` (activates on Agent Runtime; context_spec set at deploy)
 - [x] `scripts/setup_rag_corpus.py` (idempotent corpus setup)
-- [ ] Wrap tools as MCP server (`app/mcp_server.py`) for reuse
-- [ ] Multimodal input: pass GCS media as inline parts to agent (currently refs in prompt)
+- [x] MCP server `app/mcp_server.py` (FastMCP, exposes all 10 tools; `uv sync --extra mcp`) — imports OK
+- [x] **Multimodal VERIFIED**: gateway lists inbound attachments (`/emails/receiving/{id}/attachments` → `download_url`), downloads → GCS → passes as `file_data` parts to Agent Runtime. Tested with the real inbound image — agent correctly described a photo of a racing-game menu. Image/pdf/audio/video/text supported; others by reference.
+  - Fixes: attachment bytes via `download_url` (not inline); `email_id` resolved with `latest_inbound_id()` fallback when webhook id isn't a retrievable inbound id; diagnostic logging added.
 
 > Note: Vertex AI **Search** datastore from Phase 3.5 is now superseded by RAG Engine — leave (cheap/serverless) or destroy later. `vertex_search_tool` left defined-but-unused in agent.py for now.
 
@@ -64,19 +65,31 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs use
 - [ ] Full multimodal: pass GCS media as inline parts to agent (currently refs in prompt)
 - [ ] Deploy to Cloud Run (needs AGENT_ENGINE_RESOURCE from Phase 7)
 
-## Phase 5 — Infra & schedule  `[ ]`
-- [ ] Cloud Scheduler → /tasks/run (every ~5 min) + daily digest
-- [ ] Resend inbound route → Cloud Run webhook URL
-- [ ] Terraform / `agents-cli infra` for repeatable provisioning
+## Phase 5 — Infra & schedule  `[~]`
+- [x] Cloud Scheduler `autoagents-tasks-tick` → POST `/tasks/run` every 5 min (X-Tasks-Token header)
+- [x] Resend webhook `7f422451…` (`email.received`) → gateway `/inbound/email`; signing secret → Secret Manager (`resend-webhook-secret`)
+- [ ] Daily digest scheduler job (later)
+- [ ] Optional: move ad-hoc gcloud resources into Terraform for repeatability
 
 ## Phase 6 — Evaluate  `[ ]`
 - [ ] `agents-cli eval` core cases (round-trip, memory, RAG, schedule, control)
 - [ ] Iterate to thresholds
 
-## Phase 7 — Deploy  `[ ]`
-- [ ] `agents-cli deploy` (Agent Runtime) — needs explicit approval
-- [ ] Deploy Cloud Run gateway
-- [ ] End-to-end live test (send real email)
+## Phase 7 — Deploy  `[~]`
+- [x] `agents-cli deploy` (Agent Runtime) — **LIVE**. Engine: `projects/323512451403/locations/us-central1/reasoningEngines/5931933951328256000`. Tested via SDK: tool-calling + Firestore access + Memory Bank all work.
+- [x] Deploy Cloud Run gateway — **LIVE** at `https://autoagents-gateway-323512451403.us-central1.run.app` (public, user-approved). `/inbound/email` + `/tasks/run` (token-gated) verified reachable. Redeploy w/ webhook secret + metadata-fetch + `/health` rename in progress.
+- [x] Granted Agent Runtime SA (`service-323512451403@gcp-sa-aiplatform-re`) roles: datastore.user, aiplatform.user, storage.objectAdmin, secretAccessor, logWriter
+- [x] Gateway SA `autoagents-gateway@…` created + IAM
+- [x] Cloud Scheduler → gateway `/tasks/run` ✓
+- [x] Resend webhook (`email.received`) + signing secret stored ✓
+- [x] **End-to-end verified:** `/health` 200; `/tasks/run` ran a past-due task → gateway queried deployed Agent Runtime → task marked `done`. Proves Scheduler→gateway→Agent Runtime→Firestore loop live.
+- [x] Receiving **enabled** on root jmkn.tech (free plan = 1 domain; subdomain would need Resend Pro). Enabled via REST PATCH `{"receiving":true}`.
+- [x] **USER added inbound MX** at Cloudflare (`@ MX inbound-smtp.us-east-1.amazonaws.com prio 10`) — propagated.
+- [x] **INBOUND ROUND-TRIP VERIFIED LIVE** 🎉 gmail→assistant@jmkn.tech → gateway → agent replied → both logged. `/emails/receiving/{id}` retrieve path confirmed working (body present). Memory Bank stored a fact.
+
+### Gateway findings
+- Resend `email.received` webhook is **metadata-only** → gateway fetches body via `fetch_inbound_email(id)`.
+- Google edge intercepts `/healthz` → health route renamed to `/health`.
 
 ## Phase 8 — Observe  `[ ]`
 - [ ] Cloud Trace + prompt/response logging
@@ -89,6 +102,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs use
 
 ---
 
+## Documentation
+- `docs/HUMAN_GUIDE.md` — novice walkthrough: concepts, prerequisites, step-by-step setup, parameters, operations, troubleshooting.
+- `docs/AGENT_GUIDE.md` — machine-oriented: exact ordered commands, verification checks, resource inventory, env/secrets/IAM, pitfalls.
+
 ## Activity Log
 - 2026-06-25 — Phase 0 done. Clarified scope, confirmed `gemini-3.5-flash`, verified
   env + project `autoagents-500500`, wrote spec. Awaiting spec approval to start Phase 1.
@@ -99,3 +116,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs use
   Created serverless RAG corpus in us-west1, wired tools + Memory Bank. RAG ingest+search
   verified live. Resend domain verified (sending); test email sent; key in Secret Manager.
   Next: deploy Agent Runtime (needs approval) + gateway + Resend inbound.
+- 2026-06-25 — **Deployed.** Agent Runtime LIVE (engine 5931933951328256000) + Cloud Run gateway
+  LIVE (public, approved). Webhook + signing secret + Cloud Scheduler set. MCP server built.
+  End-to-end scheduler→gateway→Agent Runtime→Firestore loop verified. Only remaining: user
+  enables Resend receiving + adds MX (Cloudflare) to unlock inbound email round-trip.
+- 2026-06-25 — **Email channel COMPLETE.** Inbound MX live; text round-trip verified (Memory Bank
+  stored a fact). Multimodal verified live: emailed image → agent fetched + described it.
+  v1 done for email. Remaining optional: loop guard, daily digest, WhatsApp/calls (v2).
