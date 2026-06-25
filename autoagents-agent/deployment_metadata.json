@@ -1,0 +1,11 @@
+{
+  "remote_agent_runtime_id": "None",
+  "deployment_timestamp": "None",
+  "pending_operation": {
+    "operation_name": "projects/323512451403/locations/us-central1/reasoningEngines/5931933951328256000/operations/5130575920993665024",
+    "project": "autoagents-500500",
+    "location": "us-central1",
+    "deployment_target": "agent_runtime",
+    "started_at": "2026-06-25T01:27:42.677643+00:00"
+  }
+}

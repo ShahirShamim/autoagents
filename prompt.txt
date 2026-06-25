@@ -1,0 +1,26 @@
+I want to create autonomous agents in gcloud using the Agents-cli.
+This is what I want to be able to do:
+- Talk to the agent via email and it will respond back and forth. (Using Resend API)
+- Talk to the agent via whatsapp and it will respond back and forth. (Using whatsapp web on a business account or some other free method)
+- Agent should be able to process images, text, pdfs, audio and short video sent to it
+- Agent should have access to long term storage (Vector Store) and short term storage (Context/Memory)
+- Agent should be able to send emails on my behalf (Using Resend API)
+- Agent should be able to schedule tasks for later and do them when required
+- Agent should be able to make calls, send whatsapp messages and send emails for you when you ask it to. (Using whatsapp web on a business account or some other free method)
+- Agent should be able to remind me of tasks and take followups from other on my behalf and summarise and send this information to me
+
+Tech:
+- Use gcloud to host everything as well as the agentcli
+- gcloud project name is "autoagents"
+- Use free tier as much as possible
+- use MCP for agents and tools
+- I want to log every email and whatsapp message sent and received to the database
+- I want to log every call sent and received to the database
+- I want to be able to start, pause and stop the agent
+- I want to be able to give high level instructions and the agent will execute them
+- Use gemini 3.5 Flash for model
+
+Ask me any questions you need to. If you fail to do something ask me for clarification or instructions. If it is simple to to do just give me steps to do it myself.
+
+Use the project manager skill to scope this out. Ask me questions to clarify.
+I want to keep a steps.md file where you document the steps you take to build this. 
