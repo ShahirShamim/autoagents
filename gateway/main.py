@@ -18,7 +18,7 @@ from typing import Any
 import requests
 from fastapi import FastAPI, HTTPException, Request, Response
 
-from gateway import clients, config
+from gateway import clients, config, tenancy
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("gateway")
@@ -27,6 +27,16 @@ app = FastAPI(title="autoagents-gateway")
 ADMIN_HELP = (
     "Commands: !status, !pause, !resume, !stop. "
     "Or just email me an instruction."
+)
+
+WELCOME_EMAIL = (
+    "You're connected to your autoagents assistant. Reply to this address any time "
+    "with what you need — send a message, ask me to email or WhatsApp someone, set a "
+    "reminder, or share a file. I'll handle the rest."
+)
+WELCOME_WA = (
+    "You're connected to your autoagents assistant. Message me any time with what you "
+    "need and I'll handle it."
 )
 
 
@@ -97,25 +107,54 @@ def _store_attachments(email_id: str) -> list[dict[str, str]]:
     return out
 
 
-def _handle_admin(sender: str, text: str) -> str | None:
-    """Return a reply if `text` is an admin command from an allowlisted sender."""
-    if sender not in config.ADMIN_EMAILS:
-        return None
+def _admin_command(text: str, tenant_id: str, who: str = "owner") -> str | None:
+    """Parse a per-tenant control command. Caller must confirm `who` is the
+    tenant's own (identity-resolved) owner before calling — third parties routed
+    via a thread (Phase 4) must never reach this.
+    """
     cmd = text.strip().lower().split()[0] if text.strip() else ""
     if cmd == "!status":
-        status = clients.get_agent_status()
+        status = clients.get_agent_status(tenant_id)
         due = clients.due_tasks()
         return f"Status: {status}. {len(due)} task(s) due now. {ADMIN_HELP}"
     if cmd == "!pause":
-        clients.set_agent_status("paused", reason=f"admin:{sender}")
+        clients.set_agent_status(tenant_id, "paused", reason=who)
         return "Paused. I'll keep logging but take no action until !resume."
     if cmd == "!resume":
-        clients.set_agent_status("running", reason=f"admin:{sender}")
+        clients.set_agent_status(tenant_id, "running", reason=who)
         return "Resumed. Back to work."
     if cmd == "!stop":
-        clients.set_agent_status("stopped", reason=f"admin:{sender}")
+        clients.set_agent_status(tenant_id, "stopped", reason=who)
         return "Stopped. I'll ignore non-admin input until !resume."
     return None
+
+
+def _route_sender(channel: str, sender: str) -> tuple[str | None, str]:
+    """Resolve an inbound sender to (tenant_id, disposition).
+
+    disposition is one of:
+      "active"  → registered, active tenant; process normally
+      "onboard" → registered but pending; activate + welcome, then process
+      "reject"  → unknown sender or disabled tenant; log + drop, no agent call
+
+    Phase 2 routes by **registered identity only**. Third-party reply routing via
+    the tagged address / open threads is added in Phase 4.
+    """
+    tenant_id = tenancy.resolve_tenant(channel, sender)
+    if not tenant_id:
+        return None, "reject"
+    status = (tenancy.tenant_config(tenant_id) or {}).get("status", "active")
+    if status == "pending":
+        return tenant_id, "onboard"
+    if status != "active":
+        return tenant_id, "reject"
+    return tenant_id, "active"
+
+
+def _session_state(tenant_id: str) -> dict[str, str]:
+    """Session state the agent's tools read via ToolContext to scope per tenant."""
+    tcfg = tenancy.tenant_config(tenant_id) or {}
+    return {"tenant_id": tenant_id, "rag_corpus": tcfg.get("rag_corpus", "")}
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +205,9 @@ async def inbound_email(request: Request) -> Response:
     text = src.get("text") or src.get("html") or data.get("text") or ""
     attachments = _store_attachments(email_id)
 
-    session_id = ""  # set below when we query the agent
+    tenant_id, disp = _route_sender("email", sender)
+
+    # Audit every inbound, including rejects.
     clients.log_message(
         channel="email",
         direction="in",
@@ -175,20 +216,32 @@ async def inbound_email(request: Request) -> Response:
         subject=subject,
         body=text,
         attachments=attachments,
-        status="received",
+        status="received" if tenant_id else "rejected_unknown",
+        tenant_id=tenant_id or "",
     )
 
-    # Admin command short-circuit.
-    body_for_cmd = (subject if subject.startswith("!") else text)
-    admin_reply = _handle_admin(sender, body_for_cmd)
-    if admin_reply is not None:
-        clients.send_email(sender, f"Re: {subject}" if subject else "autoagents", admin_reply)
-        return Response(status_code=200, content="admin handled")
+    if disp == "reject":
+        log.info("rejecting unknown/inactive email sender %s", sender)
+        return Response(status_code=200, content="unknown sender")
 
-    # Respect run-state.
-    status = clients.get_agent_status()
+    if disp == "onboard":
+        tenancy.activate_tenant(tenant_id)
+        clients.send_email(sender, "Welcome to autoagents", WELCOME_EMAIL)
+
+    # Owner control command (sender resolved via their own registered identity).
+    body_for_cmd = subject if subject.startswith("!") else text
+    if body_for_cmd.strip().startswith("!"):
+        admin_reply = _admin_command(body_for_cmd, tenant_id, who=f"email:{sender}")
+        if admin_reply is not None:
+            clients.send_email(
+                sender, f"Re: {subject}" if subject else "autoagents", admin_reply
+            )
+            return Response(status_code=200, content="admin handled")
+
+    # Per-tenant run-state.
+    status = clients.get_agent_status(tenant_id)
     if status == "stopped":
-        log.info("agent stopped; ignoring inbound from %s", sender)
+        log.info("tenant %s stopped; ignoring inbound from %s", tenant_id, sender)
         return Response(status_code=200, content="stopped")
     if status == "paused":
         clients.send_email(
@@ -212,9 +265,9 @@ async def inbound_email(request: Request) -> Response:
         prompt = f"{prompt}\n\n[Attachments stored but not directly readable]\n{refs}"
 
     try:
-        session_id = clients.ensure_session(sender)
+        session_id = clients.ensure_session(tenant_id, state=_session_state(tenant_id))
         reply = clients.query_agent(
-            user_id=sender, session_id=session_id, message=prompt, files=files
+            user_id=tenant_id, session_id=session_id, message=prompt, files=files
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("agent query failed")
@@ -224,12 +277,89 @@ async def inbound_email(request: Request) -> Response:
     return Response(status_code=200, content="ok")
 
 
+@app.post("/inbound/whatsapp")
+async def inbound_whatsapp(request: Request) -> Response:
+    """Inbound WhatsApp message from the Baileys bridge."""
+    if (
+        not config.WHATSAPP_BRIDGE_SECRET
+        or request.headers.get("x-wa-secret") != config.WHATSAPP_BRIDGE_SECRET
+    ):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    sender = str(payload.get("from", ""))
+    text = payload.get("text") or ""
+    media = payload.get("media")
+
+    attachments: list[dict[str, str]] = []
+    if isinstance(media, dict) and media.get("uri"):
+        attachments = [
+            {
+                "name": "wa-media",
+                "uri": media["uri"],
+                "type": media.get("type", "application/octet-stream"),
+            }
+        ]
+
+    tenant_id, disp = _route_sender("whatsapp", sender)
+
+    clients.log_message(
+        channel="whatsapp",
+        direction="in",
+        sender=sender,
+        recipient="bridge",
+        body=text,
+        attachments=attachments,
+        status="received" if tenant_id else "rejected_unknown",
+        tenant_id=tenant_id or "",
+    )
+
+    if disp == "reject":
+        log.info("rejecting unknown/inactive whatsapp sender %s", sender)
+        return Response(status_code=200, content="unknown sender")
+
+    if disp == "onboard":
+        tenancy.activate_tenant(tenant_id)
+        clients.send_whatsapp(sender, WELCOME_WA)
+
+    # Owner control command (sender resolved via their own registered identity).
+    if text.strip().startswith("!"):
+        cmd_reply = _admin_command(text, tenant_id, who=f"wa:{sender}")
+        if cmd_reply is not None:
+            clients.send_whatsapp(sender, cmd_reply)
+            return Response(status_code=200, content="admin")
+
+    status = clients.get_agent_status(tenant_id)
+    if status == "stopped":
+        return Response(status_code=200, content="stopped")
+    if status == "paused":
+        clients.send_whatsapp(sender, "I'm paused right now and will get to this once resumed.")
+        return Response(status_code=200, content="paused")
+
+    files = [
+        {"uri": a["uri"], "type": a["type"]}
+        for a in attachments
+        if _model_supported(a["type"])
+    ]
+    try:
+        session_id = clients.ensure_session(tenant_id, state=_session_state(tenant_id))
+        reply = clients.query_agent(
+            user_id=tenant_id, session_id=session_id, message=text or "(no text)", files=files
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("whatsapp agent query failed")
+        reply = f"(sorry, I hit an error: {exc})"
+    clients.send_whatsapp(sender, reply)
+    return Response(status_code=200, content="ok")
+
+
 @app.post("/tasks/run")
 async def tasks_run(request: Request) -> dict[str, Any]:
     """Scheduler tick: execute any due tasks/reminders/followups."""
     if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
         raise HTTPException(status_code=401, detail="unauthorized")
-    if clients.get_agent_status() != "running":
+    # Scheduler stays single-tenant (tenant_0) until Phase 5 makes it span tenants.
+    tid = config.DEFAULT_TENANT
+    if clients.get_agent_status(tid) != "running":
         return {"ran": 0, "skipped": "agent not running"}
 
     ran = 0
@@ -239,9 +369,8 @@ async def tasks_run(request: Request) -> dict[str, Any]:
             f"{task.get('description', '')}"
         )
         try:
-            admin = config.ADMIN_EMAILS[0] if config.ADMIN_EMAILS else "user"
-            session_id = clients.ensure_session(admin)
-            clients.query_agent(user_id=admin, session_id=session_id, message=instruction)
+            session_id = clients.ensure_session(tid, state=_session_state(tid))
+            clients.query_agent(user_id=tid, session_id=session_id, message=instruction)
             clients.mark_task(task["id"], "done")
             ran += 1
         except Exception:  # noqa: BLE001

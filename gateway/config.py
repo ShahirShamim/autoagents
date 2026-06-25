@@ -24,6 +24,15 @@ RESEND_WEBHOOK_SECRET = os.environ.get("RESEND_WEBHOOK_SECRET", "")
 # scheduler endpoint).
 TASKS_TOKEN = os.environ.get("TASKS_TOKEN", "")
 
+# --- WhatsApp bridge (Baileys) ---
+WHATSAPP_BRIDGE_URL = os.environ.get("WHATSAPP_BRIDGE_URL", "")
+WHATSAPP_BRIDGE_SECRET = os.environ.get("WHATSAPP_BRIDGE_SECRET", "")
+ADMIN_WHATSAPP = [
+    n.strip()
+    for n in os.environ.get("ADMIN_WHATSAPP", "").replace(";", ",").split(",")
+    if n.strip()
+]
+
 # Agent Runtime resource name, e.g.
 # projects/<num>/locations/us-central1/reasoningEngines/<id>
 # Set after `agents-cli deploy`.
@@ -44,4 +53,12 @@ ADMIN_EMAILS = [
 COL_MESSAGES = "messages"
 COL_TASKS = "tasks"
 COL_STATE = "agent_state"
+COL_CONTACTS = "contacts"
 STATE_DOC_ID = "singleton"
+
+# --- Multi-tenant registry (Phase 1) ---
+COL_TENANTS = "tenants"
+COL_IDENTITIES = "identities"
+COL_THREADS = "threads"
+# The original single-tenant user is migrated to this tenant id.
+DEFAULT_TENANT = "tenant_0"

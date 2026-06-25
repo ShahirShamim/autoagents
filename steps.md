@@ -95,9 +95,26 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs use
 - [ ] Cloud Trace + prompt/response logging
 - [ ] Confirm message/task/call logging in Firestore
 
+## Phase 9 — WhatsApp (Baileys bridge)  `[x]`  ✅ LIVE
+Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated number `+44 7340 926493`.
+- [x] `whatsapp-bridge/` Node service (Baileys): GCS-persisted auth, `/qr` (token), `/send` (secret), `/health`, inbound→gateway, media→GCS
+- [x] Image → Artifact Registry `us-central1-docker.pkg.dev/autoagents-500500/autoagents/whatsapp-bridge`
+- [x] **e2-micro free VM** `autoagents-wa` (us-central1-a), static IP `136.114.229.113`, firewall tcp:8080, SA=autoagents-gateway
+- [x] Secret `whatsapp-bridge-secret`; gateway `/inbound/whatsapp`; agent `send_whatsapp` tool
+- [x] Gateway + agent redeployed with WHATSAPP_BRIDGE_URL/SECRET
+- [x] Paired (live `/qr` page) + **inbound→agent→reply verified** ✓ (handles `@lid` addressing)
+
+### WhatsApp gotchas (learned)
+- VM service account needs **`roles/artifactregistry.reader`** or the container can't pull (`downloadArtifacts` denied).
+- QR **rotates (~20-30s)** — a static screenshot fails ("couldn't link, try again"). Serve a **live auto-refreshing `/qr`** page; scan the on-screen QR.
+- WhatsApp throttles after repeated failed link attempts → "try again later"; wait a few min.
+- Post-scan close code **515** = "restart required" (normal); reconnect from saved creds, no re-pair.
+- Baileys fires `creds.update` constantly → **debounce + sequential, non-resumable** GCS backup, else the 1GB e2-micro socket-hangs and HTTP flaps.
+- `create-with-container` shows a deprecation warning (container-VM startup agent) — works for now.
+
 ## v2 (deferred)
-- [ ] WhatsApp channel (decide official Cloud API vs unofficial)
 - [ ] Voice calls (decide provider + budget)
+- [ ] WhatsApp groups (DMs only in v1) + WA admin commands (ADMIN_WHATSAPP)
 - [ ] Optional web dashboard
 
 ---
@@ -105,6 +122,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs use
 ## Documentation
 - `docs/HUMAN_GUIDE.md` — novice walkthrough: concepts, prerequisites, step-by-step setup, parameters, operations, troubleshooting.
 - `docs/AGENT_GUIDE.md` — machine-oriented: exact ordered commands, verification checks, resource inventory, env/secrets/IAM, pitfalls.
+- `docs/MULTI_TENANT_SCOPE.md` — scope for multi-user (agent-per-user) + admin webapp. Decisions LOCKED; not yet built.
 
 ## Activity Log
 - 2026-06-25 — Phase 0 done. Clarified scope, confirmed `gemini-3.5-flash`, verified
@@ -120,6 +138,71 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs use
   LIVE (public, approved). Webhook + signing secret + Cloud Scheduler set. MCP server built.
   End-to-end scheduler→gateway→Agent Runtime→Firestore loop verified. Only remaining: user
   enables Resend receiving + adds MX (Cloudflare) to unlock inbound email round-trip.
+- 2026-06-25 — **Bugfix:** deployed brain's Firestore client used the project NUMBER
+  (Agent Runtime sets GOOGLE_CLOUD_PROJECT to the number) → "database (default) does
+  not exist"; `send_email` reported failure even though the email sent. Fix: coerce a
+  numeric project → project ID in `app/config.py`; make `send_email` logging best-effort
+  so it never masks a successful send. Redeployed brain.
+- 2026-06-25 — **Correction (multi-tenant spike):** Memory Bank is wired in the agent
+  (PreloadMemoryTool + after_agent_callback) but was **never enabled on the engine**
+  (`contextSpec: False` = no memoryBankConfig). Long-term recall never actually worked;
+  earlier "memory" was session reuse (short-term). Needs Phase 0.5 (enable memoryBankConfig)
+  before per-user isolation can be validated. ADK `ToolContext.state` spike PASSED.
+- 2026-06-25 — **Phase 0.5 DONE.** Enabled Memory Bank `context_spec` on the engine (genai
+  SDK). `agents-cli deploy` strips context_spec, and a custom deploy hit build/source issues
+  → chose to **orchestrate memory in the gateway** via the engine's working memory API
+  (`async_search_memory` + `async_add_session_to_memory` in `query_agent`). Per-`user_id`,
+  cross-session recall **verified** (stored "Lahore" → recalled in a fresh session). Real,
+  isolated long-term memory now works for email + WhatsApp. Tenant-ready.
+- 2026-06-25 — **WhatsApp channel LIVE** (Baileys bridge on e2-micro free VM). Inbound→agent→reply
+  verified. Hit + fixed: AR-reader IAM for VM SA, live-QR rotation, post-pair 515, and a creds-backup
+  flood that starved the e2-micro (now debounced + sequential). Note: `whatsapp-bridge-secret` was
+  shown in chat via the `/qr` URL — rotate when convenient.
 - 2026-06-25 — **Email channel COMPLETE.** Inbound MX live; text round-trip verified (Memory Bank
   stored a fact). Multimodal verified live: emailed image → agent fetched + described it.
   v1 done for email. Remaining optional: loop guard, daily digest, WhatsApp/calls (v2).
+- 2026-06-25 — **Phase 1 (multi-tenant data model) DONE — additive, no behavior change.**
+  Added registry collections `tenants`/`identities`/`threads` + `tenant_id` everywhere.
+  New `gateway/tenancy.py` (normalize_email/phone, identity_key, resolve_tenant,
+  create_tenant, add_identity) + collection constants in both configs. Migration
+  `gateway/scripts/migrate_phase1.py` (idempotent): created **tenant_0** (owner emails +
+  WhatsApp number), backfilled `tenant_id=tenant_0` on 60 messages + 11 tasks, copied
+  `agent_state` singleton → per-tenant doc (singleton kept for back-compat). Verified
+  `resolve_tenant(email/phone) → tenant_0`. Added 3 composite indexes
+  (messages/tasks/threads by tenant_id, building async). Before threading the agent through
+  this (Phase 3), only the registry exists — live single-tenant flows untouched.
+- 2026-06-25 — **Phase 2 (gateway routing) DONE — first behavior change, deployed
+  (rev autoagents-gateway-00007-27z, health 200, env/secrets preserved).** Inbound
+  email + WhatsApp now resolve sender → tenant via `tenancy.resolve_tenant` (identity
+  lookup). `user_id` for sessions + Memory Bank is now the **tenant_id** (per-tenant
+  isolation), replacing raw email / `wa:<phone>`. New `_route_sender` → active / onboard /
+  reject. **Unknown senders are now rejected** (logged `rejected_unknown`, no agent call).
+  Pending tenants are **onboarded** on first message (flip to active + welcome, then
+  process). Run-state (`!pause`/`!stop`/etc.) is now **per-tenant** (`agent_state/<tenant_id>`)
+  and control commands are honoured only from the tenant's own identity. Scheduler still
+  single-tenant (runs as tenant_0) until Phase 5. Routing verified live (owner→active,
+  unknown→reject, pending→onboard→active, phone-normalization). NOTE: tenant_0's prior
+  memories under the old email/`wa:` user_id are orphaned by the switch — agent re-learns.
+- 2026-06-25 — **Phase 2 live-tested.** Email VERIFIED both ways: owner (`shahirshamim15314@`)
+  → `received tenant_0` → replied; unregistered (`laibahiqbal96@`) → `rejected_unknown`,
+  no agent call, no reply. **WhatsApp LID issue found:** the Baileys bridge delivers
+  `m.key.remoteJid` which is now a rotating **LID** (`262439698465015@lid`,
+  `88025757409510@lid`) — NOT the phone `923070251725`. So phone-based identity routing
+  misses. Stopgap: registered both known LIDs → tenant_0. **KNOWN GAP / hardening task:**
+  WhatsApp routing is brittle until the bridge resolves + sends the real phone number
+  (`key.senderPn` / lid→PN mapping); required before onboarding NEW WhatsApp users by phone.
+  Outbound sends still log with empty tenant_id (minor; tag later).
+- 2026-06-25 — **Phase 3 (tenant-aware tools + per-tenant RAG) DONE — deployed.** Agent
+  redeployed (Agent Runtime, same engine, ~4min) + gateway rev 00008-kzz. `app/tools.py`:
+  every tool reads `tenant_id` (+ `rag_corpus`) from `ToolContext.state` (gateway injects
+  it at session creation) and scopes all Firestore reads/writes + RAG to that tenant;
+  `send_email` now sends from the reply-routable tag `assistant+<tenant_id>@jmkn.tech`;
+  `cancel_task` refuses cross-tenant ids. **RAG decision changed:** locked "shared corpus +
+  metadata filter" → **per-tenant corpus** (deployed `import_files` has no per-file metadata
+  param, and separate corpora give physical isolation at no always-on cost); tenant_0 mapped
+  to the existing corpus, stored on its tenant doc. Gateway `ensure_session(state=...)`
+  injects `{tenant_id, rag_corpus}` and reuses a session only if it already carries that
+  tenant's state (self-heals pre-multitenant sessions). Removed the now-redundant dormant
+  Memory Bank wiring (`PreloadMemoryTool` + `after_agent_callback`) — also stops a prod
+  background error. **Verified:** local Runner isolation PASS; **live two-tenant leak test
+  PASS** (tenant B sees neither A's task nor A's documents; task-isolation + doc-routing).

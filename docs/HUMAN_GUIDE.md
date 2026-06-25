@@ -10,11 +10,12 @@ If you've never touched Google Cloud, you can still follow this top to bottom.
 
 ## 1. What is this?
 
-**autoagents** is an autonomous assistant you talk to **by email**. You email it,
-it reads your message (including images, PDFs, audio, and video attachments),
-thinks using Google's Gemini model, and emails you back. It remembers facts about
-you across conversations, can search documents you've given it, can send emails on
-your behalf, and can schedule reminders/follow-ups that it carries out later.
+**autoagents** is an autonomous assistant you talk to **by email and WhatsApp**.
+You message it, it reads what you sent (including images, PDFs, audio, and video
+attachments), thinks using Google's Gemini model, and replies on the same channel.
+It remembers facts about you across conversations, can search documents you've
+given it, can send emails and WhatsApp messages on your behalf, and can schedule
+reminders/follow-ups that it carries out later.
 
 ### The big picture (architecture)
 
@@ -39,14 +40,19 @@ your behalf, and can schedule reminders/follow-ups that it carries out later.
                 └─────────────────────────────────────────────────────┘
 ```
 
-Two deployed services:
+Three deployed services:
 
 1. **Agent Runtime** — the "brain." A managed Google service that runs the agent
    logic (built with Google's **Agent Development Kit / ADK**). It can't receive
    webhooks, so it doesn't talk to the internet directly.
 2. **Cloud Run gateway** — a tiny web service that **receives** inbound email
-   (via a Resend webhook) and **scheduler ticks**, calls the brain, and sends
-   replies. It's the only public-facing part.
+   (via a Resend webhook), inbound **WhatsApp** (via the bridge), and **scheduler
+   ticks**, calls the brain, and sends replies. It's the public-facing part.
+3. **WhatsApp bridge** — a small Node service (using **Baileys**, the unofficial
+   WhatsApp Web library) that keeps a live WhatsApp connection. It runs on an
+   always-on **e2-micro free VM** because Baileys needs a persistent socket
+   (it can't scale to zero). Inbound WhatsApp → gateway; the gateway/agent → bridge
+   to send. Auth session is saved to Cloud Storage so restarts don't need re-pairing.
 
 Supporting pieces: **Firestore** (database for logs/tasks/state), **Cloud Storage**
 (stores attachments), **RAG Engine** (document search / "long-term document memory"),
@@ -108,6 +114,8 @@ Supporting pieces: **Firestore** (database for logs/tasks/state), **Cloud Storag
 | Database | **Firestore (Native)** | Free tier, serverless, easy |
 | Email provider | **Resend** | Simple API + CLI, free tier, inbound support |
 | Region | `us-central1` (RAG corpus in `us-west1`) | Broad support; RAG `us-central1` was capacity-restricted for new projects |
+| WhatsApp method | **Baileys** (unofficial WhatsApp Web) | Free, links *your* number, no Meta verification. ToS/ban risk → use a dedicated number. |
+| WhatsApp hosting | **e2-micro free VM** | Baileys needs an always-on socket (can't scale to zero); the always-free VM keeps it ~$0. |
 
 ---
 
@@ -316,6 +324,57 @@ Email `assistant@jmkn.tech` from your Gmail with "remember my favorite color is 
 Within a few seconds you get a reply. Send a second email "what's my favorite color?"
 to confirm Memory Bank. Attach an image and ask "describe this" to confirm multimodal.
 
+### Phase 11 — WhatsApp channel (optional)
+
+WhatsApp uses **Baileys** (unofficial WhatsApp Web). It needs an always-on process,
+so it runs as a container on a **free e2-micro VM**. **Use a dedicated/secondary
+number** — unofficial access is against WhatsApp's ToS (ban risk), so keep your
+main account out of it.
+
+1. **Build + push the bridge image** (code is in `whatsapp-bridge/`):
+```bash
+gcloud artifacts repositories create autoagents --repository-format=docker --location=us-central1
+gcloud builds submit --tag us-central1-docker.pkg.dev/autoagents-500500/autoagents/whatsapp-bridge:latest whatsapp-bridge/
+```
+
+2. **Shared secret + static IP + open the port:**
+```bash
+openssl rand -hex 32 | tr -d '\n' | gcloud secrets create whatsapp-bridge-secret --data-file=-
+gcloud compute addresses create autoagents-wa-ip --region=us-central1   # prints the IP
+gcloud compute firewall-rules create allow-wa-bridge --direction=INGRESS --action=ALLOW \
+  --rules=tcp:8080 --target-tags=wa-bridge --source-ranges=0.0.0.0/0
+```
+
+3. **Let the VM's service account pull the image** (it already has GCS access):
+```bash
+gcloud projects add-iam-policy-binding autoagents-500500 \
+  --member="serviceAccount:autoagents-gateway@autoagents-500500.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.reader"
+```
+
+4. **Create the e2-micro VM running the container:**
+```bash
+WA=$(gcloud secrets versions access latest --secret=whatsapp-bridge-secret)
+gcloud compute instances create-with-container autoagents-wa --zone=us-central1-a \
+  --machine-type=e2-micro \
+  --container-image=us-central1-docker.pkg.dev/autoagents-500500/autoagents/whatsapp-bridge:latest \
+  --container-env=GCS_BUCKET=autoagents-500500-attachments,WA_AUTH_PREFIX=wa-auth/,GATEWAY_INBOUND_URL=https://<gateway-url>/inbound/whatsapp,WA_SECRET=$WA,AUTH_DIR=/data/auth,PORT=8080 \
+  --service-account=autoagents-gateway@autoagents-500500.iam.gserviceaccount.com --scopes=cloud-platform \
+  --address=<static-ip> --tags=wa-bridge --boot-disk-size=10GB
+```
+
+5. **Tell the gateway + agent about the bridge** — redeploy each, adding env
+   `WHATSAPP_BRIDGE_URL=http://<static-ip>:8080` and secret
+   `WHATSAPP_BRIDGE_SECRET=whatsapp-bridge-secret:latest`.
+
+6. **Pair (one time):** open `http://<static-ip>:8080/qr?token=<secret>` in a browser —
+   it shows a **live, auto-refreshing QR**. On the dedicated number's phone:
+   WhatsApp → Settings → **Linked Devices → Link a Device** → scan the **on-screen** QR
+   (not a screenshot — it rotates every ~20s). After linking, the session is saved to
+   Cloud Storage, so restarts reconnect automatically (no re-scan).
+
+7. **Test:** message the dedicated number from another phone → you get a reply.
+
 ---
 
 ## 5. Parameters reference (exact values we used)
@@ -338,12 +397,19 @@ to confirm Memory Bank. Attach an image and ask "describe this" to confirm multi
 | Agent Runtime sizing | cpu 1, memory 4Gi, min 1, max 10, concurrency 8, workers 1 |
 | Gateway sizing | memory 1Gi (Cloud Run defaults otherwise) |
 | Sender address | `assistant@jmkn.tech` |
+| WhatsApp method | Baileys (unofficial WhatsApp Web), dedicated number `+44 7340 926493` |
+| WhatsApp VM | `autoagents-wa`, e2-micro, us-central1-a, static IP `136.114.229.113`, port 8080 |
+| WhatsApp image | `us-central1-docker.pkg.dev/autoagents-500500/autoagents/whatsapp-bridge:latest` |
+| WhatsApp secret | `whatsapp-bridge-secret` (guards `/send` + `/qr`) |
+| WhatsApp auth | persisted to `gs://autoagents-500500-attachments/wa-auth/` |
+| Gateway WA endpoint | `POST /inbound/whatsapp` (bridge → gateway, `X-WA-Secret`) |
 
 ---
 
 ## 6. How to operate it
 
-- **Talk to it:** email `assistant@jmkn.tech`. Attach images/PDF/audio/video freely.
+- **Talk to it:** email `assistant@jmkn.tech`, or WhatsApp `+44 7340 926493`. Attach
+  images/PDF/audio/video freely on either channel.
 - **Admin commands** (from an allow-listed address — set by `ADMIN_EMAILS`):
   - `!status` — current state + how many tasks are due
   - `!pause` — keep logging but stop acting
@@ -352,8 +418,18 @@ to confirm Memory Bank. Attach an image and ask "describe this" to confirm multi
 - **Give high-level instructions:** just email them, e.g. "Follow up with John about
   the invoice by Friday and summarize the replies." It creates tasks and works over time.
 
+### WhatsApp operations
+- **Re-pair** (only if the session is lost): open `http://136.114.229.113:8080/qr?token=<secret>`
+  and scan again. Normally not needed — auth survives restarts via Cloud Storage.
+- **Restart the bridge:** `gcloud compute instances reset autoagents-wa --zone=us-central1-a`
+  (it pulls `:latest` and reconnects from saved creds).
+- **Bridge health:** `curl http://136.114.229.113:8080/health` → `{"status":"ok","connected":true}`.
+- **Bridge logs:** Cloud Logging, filter `logName=~"cos_containers"` (the container's stdout).
+- **Update the bridge code:** rebuild + push the image, then `reset` the VM.
+
 ### See what it's doing
 - **Messages/tasks:** Firestore console → collections `messages`, `tasks`, `agent_state`.
+  WhatsApp messages are logged with `channel="whatsapp"`.
 - **Gateway logs:** Cloud Run → `autoagents-gateway` → Logs.
 - **Brain logs:** Cloud Logging, filter `resource.type=aiplatform.googleapis.com/ReasoningEngine`.
 
@@ -372,6 +448,11 @@ to confirm Memory Bank. Attach an image and ask "describe this" to confirm multi
 | Env var with a comma breaks deploy | Cloud Run/Agent Runtime split env vars on commas. We used `;` for `ADMIN_EMAILS` and split on both in code. |
 | Cloud Run deploy blocked for `--allow-unauthenticated` | This is intentional (it makes a public endpoint). Required for the Resend webhook; protected by signature + token. |
 | Agent works but a tool errors after deploy | The runtime service account is missing an IAM role (Firestore/RAG/GCS/secret). Grant it (see Phase 7). |
+| Agent says "database (default) does not exist" but the action (e.g. email) actually happened | Agent Runtime gives the project **number**; Firestore's data API needs the project **ID**. Coerce a numeric project to the ID in `config.py`. Also make logging best-effort so a logging failure doesn't report the whole action as failed. |
+| WhatsApp container won't start ("downloadArtifacts denied") | The VM's service account lacks Artifact Registry read. Grant `roles/artifactregistry.reader`, then `reset` the VM. |
+| WhatsApp "couldn't link device, try again later" | The QR rotates (~20s). Scan the **live** `/qr` page's on-screen QR, not a screenshot. If it persists, you've hit WhatsApp's throttle from repeated attempts — wait a few minutes. |
+| Bridge keeps flapping / `/health` intermittent | The e2-micro is being flooded by auth backups. Backups must be **debounced + sequential + non-resumable** (already fixed in `whatsapp-bridge/index.js`). |
+| WhatsApp disconnects after pairing (close code 515) | Normal — that's WhatsApp's "restart required" after linking. The bridge reconnects from saved creds automatically. |
 
 ---
 
@@ -394,21 +475,30 @@ autoagents/
 │   ├── scripts/setup_rag_corpus.py
 │   ├── firestore.indexes.json
 │   └── .env                 # local config + secrets (gitignored)
-└── gateway/                 # the Cloud Run service
-    ├── main.py              # /inbound/email, /tasks/run, /health
-    ├── clients.py           # Firestore, GCS, Resend, Agent Runtime helpers
-    ├── config.py
-    ├── Dockerfile
-    └── requirements.txt
+├── gateway/                 # the Cloud Run service
+│   ├── main.py              # /inbound/email, /inbound/whatsapp, /tasks/run, /health
+│   ├── clients.py           # Firestore, GCS, Resend, WhatsApp, Agent Runtime helpers
+│   ├── config.py
+│   ├── Dockerfile
+│   └── requirements.txt
+└── whatsapp-bridge/         # the Baileys bridge (Node) on the e2-micro VM
+    ├── index.js             # WhatsApp connection, /qr, /send, /health, GCS auth
+    ├── package.json
+    └── Dockerfile
 ```
 
 ---
 
-## 9. What's deferred (v2)
+## 9. Live channels & what's deferred
 
-- **WhatsApp** and **voice calls** — need a method/provider decision (official
-  WhatsApp Cloud API vs unofficial; Twilio for calls). None are free.
+**Live:** Email (Resend) + WhatsApp (Baileys bridge). Both share the same brain,
+memory, RAG, scheduling, and logging.
+
+**Deferred (v2):**
+- **Voice calls** — need a provider/budget decision (e.g. Twilio). Not free.
+- **WhatsApp groups** — DMs only for now; group policy + WhatsApp admin commands later.
 - **Loop guard** — ignore self-sent email (defensive).
 - **Daily digest** — a scheduled summary email.
 - **Observability dashboards** — Cloud Trace / BigQuery analytics.
+- **Rotate `whatsapp-bridge-secret`** — it was shown in chat during pairing.
 ```

@@ -8,11 +8,13 @@ Honor idempotency notes. Do not skip the PITFALLS section — they cost real cyc
 
 ## 0. GOAL / INVARIANTS
 
-- Build an email-driven autonomous assistant on GCP using Google ADK (`agents-cli`).
-- Two deployables: **Agent Runtime** (ADK brain) + **Cloud Run gateway** (event layer).
-- Channel v1 = email only (Resend). WhatsApp/calls = deferred (v2).
+- Build a messaging-driven autonomous assistant on GCP using Google ADK (`agents-cli`).
+- Three deployables: **Agent Runtime** (ADK brain) + **Cloud Run gateway** (event layer)
+  + **WhatsApp bridge** (Baileys, Node) on an always-on e2-micro VM.
+- Channels: **email** (Resend) + **WhatsApp** (Baileys, unofficial). Voice calls = deferred.
 - Model = `gemini-3.5-flash` (multimodal). Do NOT change unless instructed.
-- Budget posture: GCP $300 trial; avoid always-on resources (no Vertex Vector Search).
+- Budget posture: GCP $300 trial; avoid always-on resources except the e2-micro
+  free-tier VM the WhatsApp bridge needs (no Vertex Vector Search, no Cloud Run min-1).
 
 ## 1. IDENTIFIERS (this deployment)
 
@@ -33,6 +35,12 @@ RUNTIME_SA        = service-323512451403@gcp-sa-aiplatform-re.iam.gserviceaccoun
 GATEWAY_SA        = autoagents-gateway@autoagents-500500.iam.gserviceaccount.com
 ATTACH_BUCKET     = autoagents-500500-attachments
 DOCS_BUCKET       = autoagents-500500-autoagents-agent-docs   # leftover from Vertex AI Search
+WA_VM             = autoagents-wa (e2-micro, us-central1-a)
+WA_IP             = 136.114.229.113   (static, port 8080)
+WA_IMAGE          = us-central1-docker.pkg.dev/autoagents-500500/autoagents/whatsapp-bridge:latest
+WA_NUMBER         = +44 7340 926493   (dedicated, linked via Baileys)
+WA_AUTH_GCS       = gs://autoagents-500500-attachments/wa-auth/
+AR_REPO           = us-central1-docker.pkg.dev/autoagents-500500/autoagents
 ```
 
 ## 2. TOOLCHAIN (preconditions)
@@ -187,6 +195,31 @@ gcloud scheduler jobs create http autoagents-tasks-tick --location=us-central1 \
 VERIFY inbound: send external email -> Firestore `messages` gets direction=in + an out reply.
 VERIFY scheduler: schedule a past-due task; `curl -X POST -H "X-Tasks-Token: $TOKEN" $GATEWAY_URL/tasks/run` -> {"ran":1}; task status=done.
 
+### 3.10 WhatsApp bridge (Baileys, e2-micro VM) — optional channel
+```bash
+gcloud services enable compute.googleapis.com
+gcloud artifacts repositories create autoagents --repository-format=docker --location=us-central1
+gcloud builds submit --tag WA_IMAGE whatsapp-bridge/
+openssl rand -hex 32 | tr -d '\n' | gcloud secrets create whatsapp-bridge-secret --data-file=-
+gcloud compute addresses create autoagents-wa-ip --region=us-central1
+gcloud compute firewall-rules create allow-wa-bridge --direction=INGRESS --action=ALLOW \
+  --rules=tcp:8080 --target-tags=wa-bridge --source-ranges=0.0.0.0/0
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:GATEWAY_SA" --role="roles/artifactregistry.reader"   # else container can't pull
+WA=$(gcloud secrets versions access latest --secret=whatsapp-bridge-secret)
+gcloud compute instances create-with-container autoagents-wa --zone=us-central1-a \
+  --machine-type=e2-micro --container-image=WA_IMAGE \
+  --container-env=GCS_BUCKET=ATTACH_BUCKET,WA_AUTH_PREFIX=wa-auth/,GATEWAY_INBOUND_URL=$GATEWAY_URL/inbound/whatsapp,WA_SECRET=$WA,AUTH_DIR=/data/auth,PORT=8080 \
+  --service-account=GATEWAY_SA --scopes=cloud-platform \
+  --address=WA_IP --tags=wa-bridge --boot-disk-size=10GB
+```
+Then redeploy gateway + agent adding env `WHATSAPP_BRIDGE_URL=http://WA_IP:8080` and secret
+`WHATSAPP_BRIDGE_SECRET=whatsapp-bridge-secret(:latest)` (agent `send_whatsapp` needs both).
+PAIR: open `http://WA_IP:8080/qr?token=$WA` (live, auto-refresh) → scan with WA_NUMBER →
+Linked Devices → Link a Device. Creds persist to WA_AUTH_GCS; restart reconnects without QR.
+VERIFY: `curl http://WA_IP:8080/health` → `connected:true`; message the number → Firestore
+`messages` channel=whatsapp (in + out); reply delivered. Update code → rebuild+push → `gcloud compute instances reset autoagents-wa --zone=us-central1-a`.
+
 ## 4. GATEWAY CONTRACT (`gateway/`)
 
 - `POST /inbound/email`: verify Svix sig (RESEND_WEBHOOK_SECRET) → parse → resolve
@@ -201,6 +234,15 @@ VERIFY scheduler: schedule a past-due task; `curl -X POST -H "X-Tasks-Token: $TO
 - `query_agent(user_id, session_id, message, files=None)`: if files, send
   `{"role":"user","parts":[{"text":...}, {"file_data":{file_uri,mime_type}}...]}` else plain string.
 - Model-supported mimes: `application/pdf` or prefix `image/ audio/ video/ text/`.
+- `POST /inbound/whatsapp`: require `X-WA-Secret == WHATSAPP_BRIDGE_SECRET`; body
+  `{from, text, media:{uri,type}|null, name}`. Log (channel=whatsapp) → admin (sender in
+  ADMIN_WHATSAPP and text starts "!") → state → media→file_data → `query_agent(user_id="wa:"+from)` →
+  `send_whatsapp` reply. `@lid` jids pass through verbatim.
+- WhatsApp send: `clients.send_whatsapp(to, text)` → `POST http://WA_IP:8080/send` (X-WA-Secret).
+  The agent's `send_whatsapp` tool calls the same bridge directly.
+- Bridge `whatsapp-bridge/index.js` (Node/Baileys): socket + QR via connection.update; auth via
+  `useMultiFileAuthState` restored-from / backed-up-to GCS (DEBOUNCED, sequential, resumable:false);
+  inbound→GATEWAY_INBOUND_URL; media→GCS; HTTP `/qr` (token), `/send` (secret), `/health`. DMs only.
 
 ## 5. RESOURCE INVENTORY
 
@@ -216,14 +258,22 @@ VERIFY scheduler: schedule a past-due task; `curl -X POST -H "X-Tasks-Token: $TO
 | Service accts | autoagents-gateway@…; runtime service agent gcp-sa-aiplatform-re |
 | Scheduler | autoagents-tasks-tick (*/5 * * * *) |
 | Resend | domain jmkn.tech (send+recv); webhook email.received |
+| Compute VM | autoagents-wa (e2-micro, us-central1-a), static IP 136.114.229.113, tag wa-bridge |
+| Firewall | allow-wa-bridge (INGRESS tcp:8080, 0.0.0.0/0) |
+| Artifact Registry | repo `autoagents` (us-central1); image whatsapp-bridge:latest |
+| WhatsApp | Baileys, dedicated number +44 7340 926493; auth in gs://…/wa-auth/ |
 
 ## 6. ENV / SECRETS
 
 Brain (Agent Runtime): RAG_CORPUS, RAG_LOCATION, ATTACHMENTS_BUCKET, SENDER_EMAIL,
-secret RESEND_API_KEY. (GOOGLE_CLOUD_PROJECT/LOCATION set in code: project from ADC, location=global.)
+WHATSAPP_BRIDGE_URL; secrets RESEND_API_KEY, WHATSAPP_BRIDGE_SECRET.
+(GOOGLE_CLOUD_PROJECT/LOCATION set in code: project from ADC, location=global.)
 Gateway (Cloud Run): GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION=us-central1,
 AGENT_ENGINE_RESOURCE, ATTACHMENTS_BUCKET, SENDER_EMAIL, ADMIN_EMAILS(`;`-sep),
-secrets RESEND_API_KEY, RESEND_WEBHOOK_SECRET, TASKS_TOKEN.
+WHATSAPP_BRIDGE_URL, ADMIN_WHATSAPP(`;`-sep, optional);
+secrets RESEND_API_KEY, RESEND_WEBHOOK_SECRET, TASKS_TOKEN, WHATSAPP_BRIDGE_SECRET.
+Bridge (VM container env): GCS_BUCKET, WA_AUTH_PREFIX, GATEWAY_INBOUND_URL, WA_SECRET,
+AUTH_DIR, PORT.
 
 ## 7. PITFALLS (verified; do not rediscover)
 
@@ -247,6 +297,30 @@ secrets RESEND_API_KEY, RESEND_WEBHOOK_SECRET, TASKS_TOKEN.
 10. **Agent Runtime deploy time**: 5-10 min; use `--no-wait` then poll `--status` (avoids timeouts).
 11. **Cross-region RAG**: corpus in us-west1, model in global, gateway/engine in us-central1 — all fine,
     reference resources by full name; rag tools `vertexai.init(location=us-west1)`.
+12. **Agent Runtime project = NUMBER**: on Agent Runtime, `google.auth.default()` /
+    `GOOGLE_CLOUD_PROJECT` is the project NUMBER. The Firestore data API then 404s
+    ("database (default) does not exist for project <number>"). Coerce numeric project →
+    project ID before constructing `firestore.Client`. Local runs use the string ID, so
+    this only surfaces post-deploy.
+13. **Logging must be best-effort**: never let a Firestore log write fail an external
+    side effect. `send_email` sends via Resend THEN logs — wrap the log in try/except so a
+    logging failure doesn't return ok=False after the email already went out.
+14. **WhatsApp = Baileys (unofficial)**: against WhatsApp ToS (ban risk) → DEDICATED number.
+    Needs an always-on socket → e2-micro VM, not Cloud Run scale-to-zero.
+15. **VM SA needs `roles/artifactregistry.reader`** or konlet can't pull the image
+    ("downloadArtifacts denied"). Diagnose via `get-serial-port-output`; grant then `reset`.
+16. **QR rotates (~20-30s)**: a static screenshot fails to link ("couldn't link, try again").
+    Serve a LIVE auto-refreshing `/qr` page; scan the on-screen QR. Repeated failures trigger a
+    WhatsApp throttle — wait minutes.
+17. **Post-pair close code 515** = restartRequired (normal); reconnect from saved creds, don't re-QR.
+18. **Baileys `creds.update` storms** (fires per pre-key): backing up the whole auth dir in
+    parallel on every event floods the 1GB e2-micro → socket-hangups + HTTP flaps. DEBOUNCE
+    (single timer), upload SEQUENTIALLY with `resumable:false`. Persist to GCS so restarts
+    reconnect (creds.json alone re-auths; pre-keys re-sync).
+19. **`@lid` addressing**: newer WhatsApp identifies senders by a LID (`<id>@lid`), not the phone
+    number. Pass the jid through verbatim for replies; don't assume `@s.whatsapp.net`.
+20. **`create-with-container` deprecation**: emits a warning (container-VM startup agent being
+    discontinued). Works today; long-term migrate to a startup-script-run container or MIG.
 
 ## 8. OPERATIONS
 
@@ -256,10 +330,16 @@ secrets RESEND_API_KEY, RESEND_WEBHOOK_SECRET, TASKS_TOKEN.
 - Redeploy brain: `agents-cli deploy ...` (no revision rollback; fix+redeploy).
 - Redeploy gateway: `gcloud run deploy autoagents-gateway --source gateway/ ...` (omit allow-unauth).
 - Rotate a secret: `gcloud secrets versions add <name> --data-file=-`, then redeploy.
+- WhatsApp bridge: health `curl http://WA_IP:8080/health`; logs Cloud Logging
+  `logName=~"cos_containers"`; restart `gcloud compute instances reset autoagents-wa --zone=us-central1-a`;
+  update code → rebuild+push image → reset. Re-pair only if creds lost: open `/qr?token=$WA`.
+- Rotate `whatsapp-bridge-secret`: add a new version → recreate VM with new `WA_SECRET`
+  container-env → redeploy gateway+agent. (It was exposed in chat via the `/qr` URL during pairing.)
 
 ## 9. DEFERRED (v2)
 
-WhatsApp (official Cloud API vs unofficial — undecided), voice calls (provider/budget),
-loop-guard (ignore sender==SENDER_EMAIL), daily-digest scheduler job, observability dashboards,
-full inline-bytes multimodal (currently GCS file_data, which is sufficient).
+Voice calls (provider/budget), WhatsApp groups + WA admin (DMs only now), loop-guard
+(ignore sender==SENDER_EMAIL), daily-digest scheduler job, observability dashboards,
+full inline-bytes multimodal (currently GCS file_data, which is sufficient),
+rotate whatsapp-bridge-secret.
 ```

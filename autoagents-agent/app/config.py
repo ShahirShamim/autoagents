@@ -26,7 +26,10 @@ LLM_LOCATION = "global"
 REGION = "us-central1"
 
 # --- GCP ---
-PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "autoagents-500500")
+# Agent Runtime resolves GOOGLE_CLOUD_PROJECT to the project NUMBER, but the
+# Firestore data API needs the project ID. Coerce a numeric value to the ID.
+_RAW_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "autoagents-500500")
+PROJECT_ID = "autoagents-500500" if _RAW_PROJECT.isdigit() else _RAW_PROJECT
 FIRESTORE_DATABASE = os.environ.get("FIRESTORE_DATABASE", "(default)")
 ATTACHMENTS_BUCKET = os.environ.get(
     "ATTACHMENTS_BUCKET", "autoagents-500500-attachments"
@@ -41,6 +44,10 @@ RAG_CORPUS = os.environ.get("RAG_CORPUS", "")
 # --- Email (Resend) ---
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "assistant@jmkn.tech")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+
+# --- WhatsApp bridge (Baileys) ---
+WHATSAPP_BRIDGE_URL = os.environ.get("WHATSAPP_BRIDGE_URL", "")
+WHATSAPP_BRIDGE_SECRET = os.environ.get("WHATSAPP_BRIDGE_SECRET", "")
 
 # --- Admin allowlist (who may issue !pause/!stop and send-on-behalf) ---
 ADMIN_EMAILS = [
@@ -59,3 +66,10 @@ COL_TASKS = "tasks"
 COL_STATE = "agent_state"
 COL_CONTACTS = "contacts"
 STATE_DOC_ID = "singleton"
+
+# --- Multi-tenant registry (Phase 1) ---
+COL_TENANTS = "tenants"
+COL_IDENTITIES = "identities"
+COL_THREADS = "threads"
+# The original single-tenant user is migrated to this tenant id.
+DEFAULT_TENANT = "tenant_0"

@@ -49,6 +49,7 @@ def log_message(
     status: str = "logged",
     session_id: str = "",
     attachments: list[dict[str, Any]] | None = None,
+    tenant_id: str = "",
 ) -> str:
     doc_id = uuid.uuid4().hex
     db().collection(config.COL_MESSAGES).document(doc_id).set(
@@ -62,23 +63,23 @@ def log_message(
             "status": status,
             "session_id": session_id,
             "attachments": attachments or [],
+            "tenant_id": tenant_id,
             "ts": now_iso(),
         }
     )
     return doc_id
 
 
-def get_agent_status() -> str:
-    snap = (
-        db().collection(config.COL_STATE).document(config.STATE_DOC_ID).get()
-    )
+def get_agent_status(tenant_id: str) -> str:
+    """Per-tenant run state ('running'/'paused'/'stopped'). Defaults to running."""
+    snap = db().collection(config.COL_STATE).document(tenant_id).get()
     if not snap.exists:
         return "running"
-    return snap.to_dict().get("status", "running")
+    return (snap.to_dict() or {}).get("status", "running")
 
 
-def set_agent_status(status: str, reason: str = "") -> None:
-    db().collection(config.COL_STATE).document(config.STATE_DOC_ID).set(
+def set_agent_status(tenant_id: str, status: str, reason: str = "") -> None:
+    db().collection(config.COL_STATE).document(tenant_id).set(
         {"status": status, "reason": reason, "updated_at": now_iso()}
     )
 
@@ -150,6 +151,37 @@ def send_email(to: str, subject: str, body: str) -> dict[str, Any]:
         body=body,
         status="sent" if ok else f"error:{resp.status_code}",
     )
+    return {"ok": ok, "id": data.get("id", ""), "raw": data}
+
+
+def send_whatsapp(to: str, text: str) -> dict[str, Any]:
+    """Send a WhatsApp message via the Baileys bridge and log it."""
+    if not (config.WHATSAPP_BRIDGE_URL and config.WHATSAPP_BRIDGE_SECRET):
+        return {"ok": False, "error": "whatsapp bridge not configured"}
+    ok = False
+    data: dict[str, Any] = {}
+    try:
+        r = requests.post(
+            config.WHATSAPP_BRIDGE_URL.rstrip("/") + "/send",
+            headers={"X-WA-Secret": config.WHATSAPP_BRIDGE_SECRET},
+            json={"to": to, "text": text},
+            timeout=30,
+        )
+        ok = r.ok
+        data = r.json() if r.content else {}
+    except Exception as exc:  # noqa: BLE001
+        data = {"error": str(exc)}
+    try:
+        log_message(
+            channel="whatsapp",
+            direction="out",
+            sender="bridge",
+            recipient=to,
+            body=text,
+            status="sent" if ok else "error",
+        )
+    except Exception:  # noqa: BLE001 - logging must not mask a real send
+        pass
     return {"ok": ok, "id": data.get("id", ""), "raw": data}
 
 
@@ -227,6 +259,41 @@ def latest_inbound_id() -> str:
 # --------------------------------------------------------------------------- #
 # Agent Runtime (query the deployed ADK agent)
 # --------------------------------------------------------------------------- #
+def _memory_facts(engine: Any, user_id: str, query: str) -> list[str]:
+    """Retrieve a user's long-term memories via the engine's Memory Bank API.
+
+    We orchestrate memory here (not in the agent) because the deployed runtime's
+    native Memory Bank wiring is unavailable, but the engine's memory API works.
+    Scoped by user_id, so it isolates per user (and per tenant).
+    """
+    import asyncio
+
+    try:
+        res = asyncio.run(engine.async_search_memory(user_id=user_id, query=query))
+    except Exception:  # noqa: BLE001
+        return []
+    mems = res.get("memories", []) if isinstance(res, dict) else []
+    facts: list[str] = []
+    for m in mems:
+        c = m.get("content", {}) if isinstance(m, dict) else {}
+        for p in c.get("parts", []) if isinstance(c, dict) else []:
+            t = p.get("text") if isinstance(p, dict) else None
+            if t:
+                facts.append(t)
+    return facts
+
+
+def _store_memory(engine: Any, user_id: str, session_id: str) -> None:
+    """Persist the current session to the user's long-term memory (best-effort)."""
+    import asyncio
+
+    try:
+        sess = engine.get_session(user_id=user_id, session_id=session_id)
+        asyncio.run(engine.async_add_session_to_memory(session=sess))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def query_agent(
     user_id: str,
     session_id: str,
@@ -234,7 +301,8 @@ def query_agent(
     files: list[dict[str, str]] | None = None,
 ) -> str:
     """Send a message (optionally with multimodal file parts) to the deployed
-    Agent Runtime agent and return its text reply.
+    Agent Runtime agent and return its text reply. Retrieves long-term memory for
+    the user and injects it, then stores the turn back to memory.
 
     files: list of {"uri": "gs://...", "type": "<mime>"} passed as file_data
     parts so Gemini reads the media directly from Cloud Storage.
@@ -247,15 +315,26 @@ def query_agent(
     vertexai.init(project=config.PROJECT_ID, location=config.REGION)
     engine = agent_engines.get(config.AGENT_ENGINE_RESOURCE)
 
+    # Inject long-term memories (per user) as context.
+    facts = _memory_facts(engine, user_id, message)
+    text = message
+    if facts:
+        text = (
+            "Known facts about this user (from your long-term memory):\n"
+            + "\n".join(f"- {f}" for f in facts[:10])
+            + "\n\n"
+            + message
+        )
+
     if files:
-        parts: list[dict[str, Any]] = [{"text": message}]
+        parts: list[dict[str, Any]] = [{"text": text}]
         for f in files:
             parts.append(
                 {"file_data": {"file_uri": f["uri"], "mime_type": f["type"]}}
             )
         outgoing: Any = {"role": "user", "parts": parts}
     else:
-        outgoing = message
+        outgoing = text
 
     chunks: list[str] = []
     for event in engine.stream_query(
@@ -264,14 +343,24 @@ def query_agent(
         ev = event if isinstance(event, dict) else getattr(event, "__dict__", {})
         content = ev.get("content") or {}
         for part in content.get("parts", []) if isinstance(content, dict) else []:
-            text = part.get("text") if isinstance(part, dict) else None
-            if text:
-                chunks.append(text)
-    return "".join(chunks).strip() or "(no response)"
+            text_part = part.get("text") if isinstance(part, dict) else None
+            if text_part:
+                chunks.append(text_part)
+    reply = "".join(chunks).strip() or "(no response)"
+
+    _store_memory(engine, user_id, session_id)
+    return reply
 
 
-def ensure_session(user_id: str) -> str:
-    """Get or create an Agent Runtime session id for a given user (email)."""
+def ensure_session(user_id: str, state: dict[str, Any] | None = None) -> str:
+    """Get or create an Agent Runtime session for a user, carrying tenant state.
+
+    ``state`` (e.g. ``{"tenant_id": ..., "rag_corpus": ...}``) is written onto the
+    session at creation so the agent's tools can read it via ``ToolContext.state``
+    and scope themselves to the tenant. An existing session is reused only if it
+    already carries the same ``tenant_id`` — otherwise a fresh, correctly-scoped
+    session is created (self-heals pre-multitenant sessions).
+    """
     if not config.AGENT_ENGINE_RESOURCE:
         return "local"
     import vertexai
@@ -279,16 +368,28 @@ def ensure_session(user_id: str) -> str:
 
     vertexai.init(project=config.PROJECT_ID, location=config.REGION)
     engine = agent_engines.get(config.AGENT_ENGINE_RESOURCE)
-    # Reuse the most recent session for this user, else create one.
+    want = (state or {}).get("tenant_id")
     try:
         sessions = engine.list_sessions(user_id=user_id)
         items = sessions.get("sessions", []) if isinstance(sessions, dict) else sessions
         if items:
             first = items[0]
-            return first.get("id") if isinstance(first, dict) else first.id
+            sid = first.get("id") if isinstance(first, dict) else first.id
+            if not want:
+                return sid
+            try:
+                got = engine.get_session(user_id=user_id, session_id=sid)
+                st = (
+                    got.get("state") if isinstance(got, dict)
+                    else getattr(got, "state", {})
+                ) or {}
+                if st.get("tenant_id") == want:
+                    return sid
+            except Exception:  # noqa: BLE001
+                pass
     except Exception:  # noqa: BLE001
         pass
-    created = engine.create_session(user_id=user_id)
+    created = engine.create_session(user_id=user_id, state=state or {})
     return created.get("id") if isinstance(created, dict) else created.id
 
 

@@ -34,6 +34,12 @@ mcp = FastMCP("autoagents-tools")
 
 # Register the same callables the agent uses. FastMCP derives the JSON schema
 # from each function's type hints and docstring.
+#
+# NOTE: the tools now take an optional ``tool_context: ToolContext`` that the ADK
+# runtime injects to scope them to a tenant. Over MCP there is no ToolContext, so
+# calls fall back to the default tenant. A tenant-aware MCP transport (passing the
+# tenant explicitly) is a future enhancement; registration is best-effort so an
+# incompatible signature never breaks the import.
 for _fn in (
     tools.send_email,
     tools.schedule_task,
@@ -46,7 +52,10 @@ for _fn in (
     tools.search_documents,
     tools.ingest_document,
 ):
-    mcp.tool()(_fn)
+    try:
+        mcp.tool()(_fn)
+    except Exception as exc:  # noqa: BLE001 - keep the module importable
+        print(f"warning: could not register MCP tool {_fn.__name__}: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

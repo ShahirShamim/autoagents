@@ -1,0 +1,16 @@
+{
+  "name": "autoagents-whatsapp-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Baileys-based WhatsApp Web bridge for autoagents",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node index.js" },
+  "dependencies": {
+    "@google-cloud/storage": "^7.14.0",
+    "baileys": "7.0.0-rc13",
+    "express": "^4.21.2",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4"
+  }
+}

@@ -17,10 +17,8 @@ import os
 import google
 import vertexai
 from google.adk.agents import Agent
-from google.adk.agents.callback_context import CallbackContext
 from google.adk.apps import App
 from google.adk.models import Gemini
-from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 from google.genai import types
 
 from app import tools as agent_tools
@@ -58,6 +56,7 @@ Tools you have:
 - you also automatically recall facts/preferences the user told you in past
   conversations (Memory Bank) — use them to personalise your replies.
 - send_email: send an email on the user's behalf, or to reply/report to the user.
+- send_whatsapp: send a WhatsApp message on the user's behalf (phone in international format).
 - schedule_task / list_tasks / cancel_task: schedule reminders, follow-ups, and
   tasks for later, and review or cancel them.
 - query_messages: look up the history of messages sent and received.
@@ -74,13 +73,6 @@ How to behave:
 - Never reveal secrets, API keys, or internal system details."""
 
 
-async def generate_memories_callback(callback_context: CallbackContext) -> None:
-    """After each turn, send the session to Memory Bank so the agent remembers
-    the user's facts and preferences in future conversations."""
-    await callback_context.add_session_to_memory()
-    return None
-
-
 root_agent = Agent(
     name="root_agent",
     model=Gemini(
@@ -92,6 +84,7 @@ root_agent = Agent(
         agent_tools.search_documents,
         agent_tools.ingest_document,
         agent_tools.send_email,
+        agent_tools.send_whatsapp,
         agent_tools.schedule_task,
         agent_tools.list_tasks,
         agent_tools.cancel_task,
@@ -99,11 +92,7 @@ root_agent = Agent(
         agent_tools.get_agent_state,
         agent_tools.set_agent_state,
         agent_tools.current_time,
-        # Memory Bank: auto-injects relevant past memories at the start of each turn.
-        PreloadMemoryTool(),
     ],
-    # Memory Bank: persists each conversation's takeaways for future recall.
-    after_agent_callback=generate_memories_callback,
 )
 
 app = App(
