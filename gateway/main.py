@@ -157,6 +157,70 @@ def _session_state(tenant_id: str) -> dict[str, str]:
     return {"tenant_id": tenant_id, "rag_corpus": tcfg.get("rag_corpus", "")}
 
 
+def _to_addresses(*objs: dict[str, Any]) -> list[str]:
+    """All recipient addresses across the inbound payload variants (str/list/dict)."""
+    out: list[str] = []
+    for o in objs:
+        v = o.get("to") if isinstance(o, dict) else None
+        if isinstance(v, str):
+            out.append(v.lower())
+        elif isinstance(v, list):
+            for x in v:
+                if isinstance(x, dict):
+                    out.append(str(x.get("email") or x.get("address") or "").lower())
+                else:
+                    out.append(str(x).lower())
+    return [a for a in out if a]
+
+
+def _tagged_tenant(addrs: list[str]) -> str | None:
+    """First recipient that is a reply-routable tenant tag, else None."""
+    for a in addrs:
+        t = tenancy.parse_tagged_tenant(a)
+        if t:
+            return t
+    return None
+
+
+def _thread_reply_email(tenant_id: str, sender: str, subject: str, text: str) -> None:
+    """A third party replied to a tagged address: enforce the access window, then
+    have the tenant's agent read it and relay a summary to the tenant owner."""
+    last_out = clients.latest_outbound_to(tenant_id, "email", sender)
+    disp, courtesy = tenancy.apply_thread_ttl(tenant_id, "email", sender, last_out)
+    if disp == "blocked":
+        if courtesy:
+            clients.send_email(
+                sender,
+                f"Re: {subject}" if subject else "autoagents",
+                "This conversation has now closed. Thanks for your message.",
+            )
+        log.info("thread reply from %s blocked (expired) for %s", sender, tenant_id)
+        return
+
+    prompt = (
+        f"A reply just came in from {sender} on an email thread you started on the "
+        f"user's behalf"
+        + (f" (subject: {subject})" if subject else "")
+        + f".\n\nTheir message:\n{text}\n\n"
+        "Summarise this reply for the user and note any action it calls for. Do not "
+        "email this third party again unless the user asks."
+    )
+    try:
+        session_id = clients.ensure_session(tenant_id, state=_session_state(tenant_id))
+        summary = clients.query_agent(tenant_id, session_id, prompt)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("thread reply agent query failed")
+        summary = f"(reply from {sender}, but I hit an error reading it: {exc})\n\n{text}"
+
+    owner = tenancy.primary_email(tenant_id)
+    if owner:
+        clients.send_email(
+            owner,
+            f"Reply from {sender}" + (f" re: {subject}" if subject else ""),
+            summary,
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
@@ -207,6 +271,20 @@ async def inbound_email(request: Request) -> Response:
 
     tenant_id, disp = _route_sender("email", sender)
 
+    # Third-party reply to a tagged address (assistant+<tenant>@) → thread routing.
+    # Checked before reject: the sender isn't a registered identity, but the tag
+    # proves which tenant's agent initiated the conversation.
+    if disp == "reject":
+        tt = _tagged_tenant(_to_addresses(src, data))
+        if tt:
+            clients.log_message(
+                channel="email", direction="in", sender=sender,
+                recipient=config.SENDER_EMAIL, subject=subject, body=text,
+                attachments=attachments, status="thread_reply", tenant_id=tt,
+            )
+            _thread_reply_email(tt, sender, subject, text)
+            return Response(status_code=200, content="thread reply")
+
     # Audit every inbound, including rejects.
     clients.log_message(
         channel="email",
@@ -226,6 +304,7 @@ async def inbound_email(request: Request) -> Response:
 
     if disp == "onboard":
         tenancy.activate_tenant(tenant_id)
+        clients.ensure_tenant_corpus(tenant_id)  # give the new agent a doc store
         clients.send_email(sender, "Welcome to autoagents", WELCOME_EMAIL)
 
     # Owner control command (sender resolved via their own registered identity).
@@ -319,6 +398,7 @@ async def inbound_whatsapp(request: Request) -> Response:
 
     if disp == "onboard":
         tenancy.activate_tenant(tenant_id)
+        clients.ensure_tenant_corpus(tenant_id)  # give the new agent a doc store
         clients.send_whatsapp(sender, WELCOME_WA)
 
     # Owner control command (sender resolved via their own registered identity).
@@ -352,18 +432,34 @@ async def inbound_whatsapp(request: Request) -> Response:
     return Response(status_code=200, content="ok")
 
 
+@app.post("/internal/ensure-corpus/{tenant_id}")
+async def internal_ensure_corpus(request: Request, tenant_id: str) -> dict[str, Any]:
+    """Token-gated: provision (or report) a tenant's RAG corpus. Used to backfill
+    corpora and to surface provisioning errors."""
+    if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return {"tenant_id": tenant_id, "corpus": clients.ensure_tenant_corpus(tenant_id)}
+
+
 @app.post("/tasks/run")
 async def tasks_run(request: Request) -> dict[str, Any]:
     """Scheduler tick: execute any due tasks/reminders/followups."""
     if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
         raise HTTPException(status_code=401, detail="unauthorized")
-    # Scheduler stays single-tenant (tenant_0) until Phase 5 makes it span tenants.
-    tid = config.DEFAULT_TENANT
-    if clients.get_agent_status(tid) != "running":
-        return {"ran": 0, "skipped": "agent not running"}
 
     ran = 0
+    skipped = 0
+    status_cache: dict[str, str] = {}
     for task in clients.due_tasks():
+        tid = task.get("tenant_id") or config.DEFAULT_TENANT
+        # Honour each tenant's run-state; paused/stopped tenants' tasks stay pending.
+        st = status_cache.get(tid)
+        if st is None:
+            st = clients.get_agent_status(tid)
+            status_cache[tid] = st
+        if st != "running":
+            skipped += 1
+            continue
         instruction = (
             f"Scheduled {task.get('type', 'task')} is due. Carry it out now: "
             f"{task.get('description', '')}"
@@ -374,6 +470,6 @@ async def tasks_run(request: Request) -> dict[str, Any]:
             clients.mark_task(task["id"], "done")
             ran += 1
         except Exception:  # noqa: BLE001
-            log.exception("task %s failed", task.get("id"))
+            log.exception("task %s (tenant %s) failed", task.get("id"), tid)
             clients.mark_task(task["id"], "error")
-    return {"ran": ran}
+    return {"ran": ran, "skipped": skipped}

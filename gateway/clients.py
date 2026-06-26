@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -10,6 +11,8 @@ import requests
 from google.cloud import firestore, storage
 
 from gateway import config
+
+log = logging.getLogger("gateway.clients")
 
 _db: firestore.Client | None = None
 _gcs: storage.Client | None = None
@@ -106,6 +109,64 @@ def mark_task(task_id: str, status: str) -> None:
     db().collection(config.COL_TASKS).document(task_id).update(
         {"status": status, "completed_at": now_iso()}
     )
+
+
+def ensure_tenant_corpus(tenant_id: str) -> str:
+    """Ensure a tenant has its own RAG corpus; create one on first need.
+
+    Per-tenant corpora give each agent a private long-term document store
+    (physical isolation). Stores the corpus resource name on the tenant doc and
+    returns it. Best-effort: on failure the tenant simply has no doc store yet.
+    """
+    ref = db().collection(config.COL_TENANTS).document(tenant_id)
+    existing = (ref.get().to_dict() or {}).get("rag_corpus")
+    if existing:
+        return existing
+    try:
+        import vertexai
+        from vertexai import rag
+        from vertexai.rag.utils import resources as r
+
+        vertexai.init(project=config.PROJECT_ID, location=config.RAG_LOCATION)
+        try:
+            cfg = f"projects/{config.PROJECT_ID}/locations/{config.RAG_LOCATION}/ragEngineConfig"
+            rag.update_rag_engine_config(
+                rag_engine_config=rag.RagEngineConfig(
+                    name=cfg,
+                    rag_managed_db_config=rag.RagManagedDbConfig(tier=r.Basic()),
+                )
+            )
+        except Exception:  # noqa: BLE001 - already-basic is fine
+            pass
+        corpus = rag.create_corpus(display_name=f"autoagents-{tenant_id}")
+        ref.set({"rag_corpus": corpus.name}, merge=True)
+        return corpus.name
+    except Exception:  # noqa: BLE001 - degrade gracefully (no doc store yet)
+        log.exception("ensure_tenant_corpus failed for %s", tenant_id)
+        return ""
+
+
+def latest_outbound_to(tenant_id: str, channel: str, contact: str) -> str:
+    """ISO ts of the most recent outbound message this tenant sent to ``contact``.
+
+    Used to detect that the agent re-sent to a third party (which reopens their
+    reply window). Empty string if the tenant never messaged that contact.
+    """
+    cl = contact.strip().lower()
+    best = ""
+    for d in (
+        db().collection(config.COL_MESSAGES).where("tenant_id", "==", tenant_id).stream()
+    ):
+        r = d.to_dict()
+        if (
+            r.get("direction") == "out"
+            and r.get("channel") == channel
+            and str(r.get("to", "")).strip().lower() == cl
+        ):
+            ts = r.get("ts", "")
+            if ts > best:
+                best = ts
+    return best
 
 
 # --------------------------------------------------------------------------- #
@@ -259,6 +320,26 @@ def latest_inbound_id() -> str:
 # --------------------------------------------------------------------------- #
 # Agent Runtime (query the deployed ADK agent)
 # --------------------------------------------------------------------------- #
+def _run_async(coro: Any) -> Any:
+    """Run a coroutine to completion whether or not an event loop is active.
+
+    The engine only exposes async memory methods, but the gateway's FastAPI
+    handlers run inside an event loop where ``asyncio.run()`` raises "cannot be
+    called from a running event loop". When a loop is already running, execute
+    the coroutine in a short-lived worker thread (which has no loop).
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(lambda: asyncio.run(coro)).result()
+
+
 def _memory_facts(engine: Any, user_id: str, query: str) -> list[str]:
     """Retrieve a user's long-term memories via the engine's Memory Bank API.
 
@@ -266,10 +347,8 @@ def _memory_facts(engine: Any, user_id: str, query: str) -> list[str]:
     native Memory Bank wiring is unavailable, but the engine's memory API works.
     Scoped by user_id, so it isolates per user (and per tenant).
     """
-    import asyncio
-
     try:
-        res = asyncio.run(engine.async_search_memory(user_id=user_id, query=query))
+        res = _run_async(engine.async_search_memory(user_id=user_id, query=query))
     except Exception:  # noqa: BLE001
         return []
     mems = res.get("memories", []) if isinstance(res, dict) else []
@@ -285,11 +364,9 @@ def _memory_facts(engine: Any, user_id: str, query: str) -> list[str]:
 
 def _store_memory(engine: Any, user_id: str, session_id: str) -> None:
     """Persist the current session to the user's long-term memory (best-effort)."""
-    import asyncio
-
     try:
         sess = engine.get_session(user_id=user_id, session_id=session_id)
-        asyncio.run(engine.async_add_session_to_memory(session=sess))
+        _run_async(engine.async_add_session_to_memory(session=sess))
     except Exception:  # noqa: BLE001
         pass
 

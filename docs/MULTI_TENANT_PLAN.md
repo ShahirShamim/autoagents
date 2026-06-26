@@ -231,11 +231,43 @@ Two assumptions underpin everything; validate before the big refactor.
   reply is blocked + gets the one-time courtesy note; a re-send by the agent reopens a
   fresh window.
 
+### Phase 4 — RESULTS (run 2026-06-25) ✅ DEPLOYED (gateway rev 00009-gnq, no agent redeploy)
+- **Gateway-only** (key simplification): the agent already emails third parties *from*
+  `assistant+<tenant_id>@jmkn.tech` (Phase 3) and logs every outbound to `messages`, so the
+  gateway correlates inbound replies via the tagged `To:` + the outbound log — no agent change.
+- `tenancy.parse_tagged_tenant(addr)` → tenant from the `+<tenant>` tag (validated against a
+  real tenant). `tenancy.apply_thread_ttl(tenant, channel, contact, latest_outbound_at)` →
+  the 3h window state machine over the `threads` collection: first reply opens the window;
+  inside → process; expired → block + **one** courtesy note (`closed_notified`); a fresh
+  outbound newer than `first_reply_at` reopens. `clients.latest_outbound_to(...)` provides the
+  reopen signal from the message log.
+- `/inbound/email`: before reject, a valid tag → `_thread_reply_email` → TTL gate → feed the
+  reply into the tenant's agent session → relay the agent's **summary to the tenant owner**
+  (`tenancy.primary_email`). The third party is never auto-answered except the expiry courtesy.
+- **Verified:** Resend accepts the plus-tagged `from` (HTTP 200); tag parse (valid/bogus/no-plus)
+  and the full TTL machine (first→process, within→process, expired→blocked+courtesy-once,
+  expired-again→silent, reopen→fresh window) unit-tested against live Firestore.
+- **KNOWN GAP — WhatsApp third-party replies:** blocked by the same LID rotation as Phase 2
+  (inbound arrives as a LID, not the phone the agent sent to → no correlation). Needs the
+  bridge to resolve + send the real phone. Email threads are unaffected.
+- **Pending:** live end-to-end email round-trip (agent emails a real third party → they reply →
+  owner receives the relayed summary).
+
 ## Phase 5 — Multi-tenant scheduler
 
 - `/tasks/run`: scan due tasks across **all** tenants; execute each with its own
   `tenant_id` context.
 - **Verify:** schedule due tasks for A and B; one tick runs both, each in its own context.
+
+### Phase 5 — RESULTS (run 2026-06-25) ✅ DEPLOYED (gateway rev 00010-t84, gateway-only)
+- `/tasks/run` iterates `clients.due_tasks()` (already spans all tenants) and runs each task
+  with `tid = task.tenant_id`: `ensure_session(tid, state=_session_state(tid))` +
+  `query_agent(user_id=tid, …)`. Per-tenant run-state is checked (cached per tick); a
+  paused/stopped tenant's due tasks are **skipped and left pending** (they run when it resumes).
+  Response is `{ran, skipped}`.
+- **Verified live:** due tasks for tenant_0 + a probe tenant → `{"ran":2,"skipped":0}`, both
+  marked `done` under their own tenant; a paused tenant's task → `{"ran":0,"skipped":1}`,
+  stayed `pending`.
 
 ## Phase 6 — Admin webapp (new Cloud Run service `autoagents-admin`)
 
@@ -247,11 +279,63 @@ Two assumptions underpin everything; validate before the big refactor.
 - **Verify:** create a tenant + assign an identity in the UI; that identity can then
   onboard by messaging; pause a tenant from the UI → its inbound is parked.
 
+### Phase 6 — RESULTS (run 2026-06-25) ✅ DEPLOYED (`autoagents-admin` rev 00001-dkj, PRIVATE)
+- New `admin/` Cloud Run service: FastAPI + server-rendered HTML (no JS framework),
+  shared-password gate via an `itsdangerous`-signed cookie (secret `admin-password`).
+- Pages: tenants list (lifecycle + agent-state badges, assigned emails/phones); create tenant
+  (pending + assign identities inline); tenant detail — add/remove email & phone identities
+  (kept in sync between `identities` docs and the tenant doc lists), set run-state
+  (running/paused/stopped → `agent_state/<tid>`), set lifecycle (pending/active/disabled),
+  recent messages + tasks.
+- Reuses the gateway service account (already has Firestore); granted it `secretAccessor` on
+  `admin-password`.
+- **Access model:** user chose **private** over public+password → deployed
+  `--no-allow-unauthenticated`; reached via `gcloud run services proxy autoagents-admin`
+  (Google-auth tunnel). Cookie `secure` flag env-gated (`COOKIE_SECURE`, default false) so it
+  works over the localhost proxy. `allUsers` bindings = 0 (confirmed not public).
+- Smoke-tested locally (auth gate, login ok/wrong, tenant list, detail, controls).
+- **Security note:** the admin password was exposed in chat — **rotate** with
+  `gcloud secrets versions add admin-password` before real use.
+
 ## Phase 7 — Test + docs
 
 - End-to-end with **two real test tenants**: isolation (memory, docs, tasks, state),
   onboarding, third-party reply round-trip (email + WhatsApp), admin controls.
 - Update `HUMAN_GUIDE.md`, `AGENT_GUIDE.md`, `steps.md` for multi-tenant.
+
+### Phase 7 — RESULTS (run 2026-06-25) ✅ COMPLETE
+- **New-tenant RAG corpus auto-provisioning:** `clients.ensure_tenant_corpus(tenant_id)` creates
+  a per-tenant corpus (us-west1, Basic tier) at onboarding and stores it on the tenant doc, so
+  every agent gets a private long-term doc store. Gateway SA granted `roles/aiplatform.user`.
+  A token-gated `POST /internal/ensure-corpus/{tid}` backfills/repairs corpora.
+- **Real second-tenant end-to-end:** created **tenant_1** (Laiba, `laibahiqbal96@gmail.com`) →
+  she emailed in → onboarded (pending→active) with welcome + reply; her message logged under
+  **tenant_1** (not tenant_0); her own corpus provisioned. Identity routing + message isolation
+  confirmed live. Final roster: tenant_0 (owner, 2 emails) + tenant_1 (Laiba), both active with corpora.
+- **Production memory bug found + fixed (significant):** the gateway orchestrated Memory Bank
+  via `asyncio.run()` inside its **async** FastAPI handlers → `RuntimeError: asyncio.run() cannot
+  be called from a running event loop` → both retrieval and storage **silently failed on every
+  real webhook**. Memory had never actually worked in production for *any* tenant (Phase 0.5's
+  "pass" only ever ran the sync test-script path). Fix: `clients._run_async` runs the coroutine
+  in a worker thread when a loop is already active. Verified store→recall works **inside an async
+  handler** ("Otter" recalled). Gateway rev 00013-nt7.
+- An IAM-propagation race had silently failed tenant_1's onboarding-time corpus; surfaced via
+  `log.exception` + the backfill endpoint, then repaired.
+
+---
+
+## ✅ Multi-tenant build COMPLETE (Phases 0–7)
+All phases shipped + verified live. Deployables: Agent Runtime brain (tenant-aware tools) +
+`autoagents-gateway` (rev 00013) + `autoagents-admin` (private) + Baileys WhatsApp bridge.
+
+### Known gaps / follow-ups
+- **WhatsApp third-party reply routing** blocked by LID rotation (bridge sends a rotating
+  `@lid`, not the phone) — email threads work; WhatsApp onboarding relies on registering the
+  current LID. Proper fix: bridge resolves + sends the real phone (`senderPn`).
+- **Rotate** the admin password (was exposed in chat) and the WhatsApp bridge secret.
+- Outbound messages log with an empty `tenant_id` from the gateway's own `send_email` (the
+  agent-tool sends are tenant-tagged); tag gateway sends too if you want fully complete audit
+  attribution.
 
 ---
 

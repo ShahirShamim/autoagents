@@ -10,6 +10,7 @@ agent package in Phase 3 without dragging in the gateway's Firestore layer.
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 from typing import Any
 
@@ -112,3 +113,85 @@ def add_identity(tenant_id: str, channel: str, value: str) -> str:
         merge=True,
     )
     return key
+
+
+def primary_email(tenant_id: str) -> str:
+    """The tenant owner's primary email (where third-party replies are relayed)."""
+    emails = (tenant_config(tenant_id) or {}).get("emails", []) or []
+    return emails[0] if emails else ""
+
+
+# --------------------------------------------------------------------------- #
+# Third-party reply threads (Phase 4)
+# --------------------------------------------------------------------------- #
+def parse_tagged_tenant(addr: str) -> str | None:
+    """Extract the tenant id from a reply-routable address.
+
+    The agent emails third parties from ``assistant+<tenant_id>@jmkn.tech``; a
+    reply lands on that address, so the ``+<tenant_id>`` tag tells us which tenant
+    initiated the thread. Returns the tenant id only if it is a real tenant.
+    """
+    local, _, _domain = normalize_email(addr).partition("@")
+    if "+" not in local:
+        return None
+    _base, _, tag = local.partition("+")
+    if tag and tenant_config(tag):
+        return tag
+    return None
+
+
+def thread_doc_id(tenant_id: str, channel: str, contact: str) -> str:
+    """Deterministic thread id so re-sends + replies hit the same row."""
+    c = normalize_email(contact) if channel == "email" else normalize_phone(contact)
+    return f"{tenant_id}:{channel}:{c}"
+
+
+def apply_thread_ttl(
+    tenant_id: str, channel: str, contact: str, latest_outbound_at: str
+) -> tuple[str, bool]:
+    """Enforce the third-party access window. Returns ``(disposition, courtesy)``:
+
+    - ``("process", False)`` — within the window (or first reply): feed to the agent.
+    - ``("blocked", True)``  — just expired: drop, and send ONE courtesy note.
+    - ``("blocked", False)`` — already expired + already notified: drop silently.
+
+    The clock starts at the contact's FIRST reply (``first_reply_at``); a fresh
+    outbound to the same contact *after* that (``latest_outbound_at`` newer than
+    the first reply) reopens a new window.
+    """
+    ref = clients.db().collection(config.COL_THREADS).document(
+        thread_doc_id(tenant_id, channel, contact)
+    )
+    snap = ref.get()
+    data = snap.to_dict() if snap.exists else {}
+    now = dt.datetime.now(dt.UTC)
+    nowi = now.isoformat()
+    first = data.get("first_reply_at")
+
+    # Reopen: the agent re-sent to this contact after their first reply.
+    if first and latest_outbound_at and latest_outbound_at > first:
+        first = None
+
+    base = {
+        "tenant_id": tenant_id, "channel": channel, "contact": contact,
+        "last_at": nowi, "created_at": data.get("created_at", nowi),
+    }
+
+    if not first:
+        # First reply (or reopened): start a fresh 3h window.
+        expires = (now + dt.timedelta(hours=config.THREAD_TTL_HOURS)).isoformat()
+        ref.set({**base, "first_reply_at": nowi, "expires_at": expires,
+                 "status": "active", "closed_notified": False}, merge=True)
+        return "process", False
+
+    if nowi <= data.get("expires_at", ""):
+        # Still inside the window.
+        ref.set({**base, "status": "active"}, merge=True)
+        return "process", False
+
+    # Expired.
+    if not data.get("closed_notified"):
+        ref.set({**base, "status": "expired", "closed_notified": True}, merge=True)
+        return "blocked", True
+    ref.set({**base, "status": "expired"}, merge=True)
+    return "blocked", False

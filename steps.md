@@ -206,3 +206,62 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
   Memory Bank wiring (`PreloadMemoryTool` + `after_agent_callback`) — also stops a prod
   background error. **Verified:** local Runner isolation PASS; **live two-tenant leak test
   PASS** (tenant B sees neither A's task nor A's documents; task-isolation + doc-routing).
+- 2026-06-25 — **Phase 4 (third-party threads + reply routing + 3h TTL) DONE — gateway
+  rev 00009-gnq, no agent redeploy.** Realised it's gateway-only: the agent already sends
+  third-party email from `assistant+<tenant>@jmkn.tech` (Phase 3) and logs every outbound,
+  so replies correlate via the tagged `To:` + the outbound `messages` log. New: `tenancy.
+  parse_tagged_tenant` (To-tag → tenant), `apply_thread_ttl` (3h window state machine in
+  the `threads` collection), `clients.latest_outbound_to` (reopen detection). Gateway
+  `/inbound/email`: before reject, if the `To:` carries a valid tenant tag → thread reply:
+  enforce TTL, feed the reply into the tenant's agent session, relay the agent's summary to
+  the tenant **owner** (never auto-replies to the third party except a one-time courtesy on
+  expiry). Re-send to the same contact reopens a fresh window. Verified: Resend accepts the
+  plus-tagged `from` (HTTP 200); TTL state machine + tag parse unit-tested (first→process,
+  within→process, expired→blocked+courtesy-once, reopen→fresh window). **KNOWN GAP:**
+  WhatsApp third-party reply routing is blocked by the same LID issue as Phase 2 (inbound
+  arrives as a rotating LID, not the phone we sent to — can't correlate); email threads work.
+  Real end-to-end email round-trip pending a live third-party exchange.
+- 2026-06-25 — **Phase 5 (multi-tenant scheduler) DONE — gateway rev 00010-t84, gateway-only.**
+  `/tasks/run` now runs each due task in ITS OWN tenant context: `tid = task.tenant_id`,
+  `ensure_session(tid, state=_session_state(tid))`, `query_agent(user_id=tid, …)`. Honours
+  per-tenant run-state (cached) — a paused/stopped tenant's due tasks are skipped and left
+  pending (run on resume). Returns `{ran, skipped}`. **Verified live:** seeded due tasks for
+  tenant_0 + a probe tenant → `{"ran":2,"skipped":0}`, both marked done under their own
+  tenant; paused-tenant task → `{"ran":0,"skipped":1}`, stayed pending. Probe data cleaned up.
+- 2026-06-25 — **Phase 6 (admin webapp) DONE — new Cloud Run service `autoagents-admin`
+  (rev 00001-dkj), PRIVATE.** FastAPI + server-rendered HTML (no JS framework), shared-password
+  gate via signed cookie (secret `admin-password`, value provided by user — EXPOSED in chat,
+  rotate after testing). Pages: tenants list (lifecycle + agent-state badges, emails/phones),
+  create tenant (pending + assign identities), tenant detail (add/remove email+phone identities,
+  set run-state running/paused/stopped, set lifecycle pending/active/disabled, recent messages
+  + tasks). Reuses the gateway SA (Firestore access) + granted it secretAccessor on admin-password.
+  Deployed `--no-allow-unauthenticated` (user chose private over public+password); access via
+  `gcloud run services proxy autoagents-admin --region us-central1` (Google-auth tunnel to
+  localhost). Cookie `secure` flag is env-gated (COOKIE_SECURE, default false) so it works over
+  the localhost proxy. Smoke-tested locally: auth gate, login, tenant list, detail, controls.
+- 2026-06-25 — **Phase 7 (test + docs) DONE.** (a) New-tenant **RAG corpus auto-provisioning**
+  at onboarding (`clients.ensure_tenant_corpus`, gateway rev 00011+) — each new agent gets its
+  own private doc store; granted gateway SA `aiplatform.user`. (b) **Real second-tenant E2E
+  test:** created tenant_1 (Laiba, laibahiqbal96@) → she emailed in → onboarded (pending→active),
+  welcome + reply sent, her message logged under **tenant_1** (not tenant_0), her own corpus
+  provisioned. Identity routing + message isolation verified. (c) **Found + fixed a real
+  production bug:** the gateway's memory orchestration used `asyncio.run()` inside the async
+  FastAPI handlers → "cannot be called from a running event loop" → memory retrieval + storage
+  **silently failed on every live webhook** (Phase 0.5 only ever exercised the sync test path,
+  so it looked fine). Memory had NEVER worked in production for any tenant. Fix: `_run_async`
+  helper runs the coroutine in a worker thread when a loop is active (gateway rev 00013-nt7).
+  Verified store→recall now works *inside an async handler* ("Otter" recalled). (d) IAM
+  propagation race had made tenant_1's onboarding-time corpus fail silently; added
+  `log.exception` + a token-gated `/internal/ensure-corpus/{tid}` backfill endpoint; corpus
+  backfilled. **Multi-tenant build (Phases 0–7) COMPLETE.**
+- 2026-06-26 — **Fixed: agent-initiated WhatsApp sends** ("WhatsApp bridge not configured").
+  Cause: the deployed agent's `send_whatsapp` needs WHATSAPP_BRIDGE_URL + _SECRET. The
+  engine had the SECRET (secretEnv) but NOT the URL. **Key lesson: Agent Runtime does NOT
+  load `.env`** — the deployed agent runs on `app/config.py` defaults + engine `env`/`secretEnv`
+  (set only via `agents-cli deploy --update-env-vars` / `--secrets`, persisted across redeploys).
+  An `.env`-only edit + redeploy did nothing. Fix: `agents-cli deploy --update-env-vars
+  WHATSAPP_BRIDGE_URL=http://136.114.229.113:8080 --secrets RESEND_API_KEY=resend-api-key,
+  WHATSAPP_BRIDGE_SECRET=whatsapp-bridge-secret`. Verified: agent sent a real WhatsApp to the
+  owner number (got a Baileys message id). Inspect engine env via the REST API
+  (`GET …/reasoningEngines/<id>` → spec.deploymentSpec.env/secretEnv); `gcloud ai
+  reasoning-engines` does not exist in this CLI.

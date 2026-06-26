@@ -343,3 +343,69 @@ Voice calls (provider/budget), WhatsApp groups + WA admin (DMs only now), loop-g
 full inline-bytes multimodal (currently GCS file_data, which is sufficient),
 rotate whatsapp-bridge-secret.
 ```
+
+---
+
+## 10. MULTI-TENANT ARCHITECTURE (Phases 0–7, all live)
+
+**Model.** One Agent Runtime engine + one gateway + one admin webapp serve N tenants.
+Isolation key = `tenant_id`, used as the Agent Runtime `user_id` (so sessions + Memory
+Bank isolate per tenant) and as a filter on all Firestore writes/reads + per-tenant RAG corpus.
+
+**Firestore collections (added).**
+- `tenants/{id}`: `{name, status: pending|active|disabled, emails[], phones[], rag_corpus, ...}`
+- `identities/{email:<addr>|phone:<digits>}`: `{tenant_id, channel}` — point-lookup routing.
+- `threads/{tenant:channel:contact}`: third-party reply window `{first_reply_at, expires_at,
+  status, closed_notified}`.
+- `tenant_id` field added to `messages`, `tasks`; `agent_state` keyed by `tenant_id`.
+
+**Routing (gateway `_route_sender`).** identity → (tagged-address thread) → reject.
+`resolve_tenant(channel, sender)`; pending → onboard (activate + welcome + `ensure_tenant_corpus`);
+unknown → `rejected_unknown`, no agent call. `user_id = tenant_id` everywhere.
+
+**Tenant-aware tools (`app/tools.py`).** Each tool takes `tool_context: ToolContext` and reads
+`tool_context.state["tenant_id"]` / `["rag_corpus"]` (gateway injects via
+`ensure_session(state=...)` at session creation). Fallback = `DEFAULT_TENANT` (never an unscoped
+query). `send_email` sends from `assistant+<tenant>@jmkn.tech` (reply-routable tag).
+
+**RAG = per-tenant corpus** (NOT shared+filter — deployed `import_files` has no per-file
+metadata; separate corpora give physical isolation, no always-on cost). `ensure_tenant_corpus`
+creates one at onboarding (us-west1, Basic tier).
+
+**Third-party threads + 3h TTL (gateway-only).** Outbound from the tagged address + the
+outbound `messages` log let the gateway correlate replies (`parse_tagged_tenant` +
+`latest_outbound_to`). `apply_thread_ttl` = window state machine (first reply opens 3h; expired
+→ block + one courtesy note; a newer outbound reopens). Reply → agent summary → relayed to
+tenant owner (`primary_email`).
+
+**Admin webapp** = separate Cloud Run service `admin/`, private (`--no-allow-unauthenticated`,
+reached via `gcloud run services proxy`), shared-password signed cookie (`COOKIE_SECURE` env-gated
+because the proxy is http://localhost).
+
+**Scheduler** `/tasks/run` runs each due task under its own `tenant_id`; skips paused/stopped tenants.
+
+### PITFALLS (multi-tenant; verified)
+- **`asyncio.run()` inside the async FastAPI handlers throws** ("cannot be called from a running
+  event loop") → the gateway's Memory Bank calls **silently failed in production** (only the sync
+  test path ever worked). Fix: `clients._run_async` runs the coroutine in a worker thread when a
+  loop is active. Any future engine-async call from a handler MUST go through it.
+- **Engine exposes only `async_*` memory methods** (`async_search_memory`,
+  `async_add_session_to_memory`) — no sync variants.
+- **Session state is fixed at creation.** `ensure_session` reuses a session only if its state's
+  `tenant_id` matches; else creates a fresh stateful one (self-heals pre-multitenant sessions).
+- **WhatsApp inbound is a rotating LID**, not the phone → third-party WhatsApp threads + phone-based
+  onboarding don't correlate. Register the current LID as a stopgap; real fix = bridge sends `senderPn`.
+- **IAM propagation lag** can make a just-granted role (e.g. `aiplatform.user` for corpus create)
+  fail for ~1–2 min; `ensure_tenant_corpus` logs + degrades, backfill via `/internal/ensure-corpus/{tid}`.
+- **`agents-cli deploy` strips `context_spec`** → native Memory Bank can't be wired on the agent;
+  memory is orchestrated in the gateway instead.
+
+### PITFALL — Agent Runtime ignores `.env`
+The deployed agent runs on `app/config.py` defaults + the engine's `env` / `secretEnv`, NOT
+the repo `.env` (that's only for local `agents-cli run`/`playground`). Set/inspect runtime
+config via `agents-cli deploy --update-env-vars KEY=VAL --secrets ENV=secret-name` (values
+persist across redeploys). Inspect the live engine with the REST API
+`GET https://us-central1-aiplatform.googleapis.com/v1/projects/<proj>/locations/us-central1/reasoningEngines/<id>`
+→ `spec.deploymentSpec.env` / `secretEnv` (there is no `gcloud ai reasoning-engines` command).
+Example bug: WhatsApp sends failed because `WHATSAPP_BRIDGE_URL` was never set on the engine
+(the secret was) — editing `.env` did nothing.

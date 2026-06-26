@@ -13,6 +13,10 @@ ATTACHMENTS_BUCKET = os.environ.get(
     "ATTACHMENTS_BUCKET", "autoagents-500500-attachments"
 )
 
+# RAG Engine region (corpora live here; us-central1 is capacity-restricted for
+# new projects). Used to auto-provision a per-tenant corpus at onboarding.
+RAG_LOCATION = os.environ.get("RAG_LOCATION", "us-west1")
+
 # Resend
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "assistant@jmkn.tech")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -62,3 +66,9 @@ COL_IDENTITIES = "identities"
 COL_THREADS = "threads"
 # The original single-tenant user is migrated to this tenant id.
 DEFAULT_TENANT = "tenant_0"
+
+# --- Third-party reply threads (Phase 4) ---
+# A third party (someone the agent emailed on a tenant's behalf) may converse
+# with the agent only for this many hours after their FIRST reply. A fresh
+# outbound to the same contact reopens the window.
+THREAD_TTL_HOURS = int(os.environ.get("THREAD_TTL_HOURS", "3"))

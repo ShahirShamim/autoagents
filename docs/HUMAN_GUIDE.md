@@ -502,3 +502,62 @@ memory, RAG, scheduling, and logging.
 - **Observability dashboards** — Cloud Trace / BigQuery analytics.
 - **Rotate `whatsapp-bridge-secret`** — it was shown in chat during pairing.
 ```
+
+---
+
+## 10. Multi-tenant operations (assign agents to different people)
+
+The system now runs **one agent per person ("tenant")**, all on the same shared
+infrastructure. Each tenant has fully separate long-term memory, documents, tasks,
+and message history — nobody can see anyone else's.
+
+### How a message finds the right agent
+1. **Registered sender** → routed to that tenant's agent.
+   - Email matched by the From address; WhatsApp by the sender's number/ID.
+2. **Pending tenant's first message** → the tenant is **onboarded** (activated, sent a
+   welcome, given its own document store), then handled normally.
+3. **Reply on a thread the agent started** (see below) → routed to the initiating tenant.
+4. **Anyone else** → **ignored** (logged as `rejected_unknown`, no reply). This stops
+   strangers from chatting with your agents.
+
+### The admin webapp (`autoagents-admin`)
+Private — open an authenticated tunnel, then use a browser:
+```
+gcloud run services proxy autoagents-admin --region us-central1 --project autoagents-500500
+# then open http://localhost:8080 and log in with the admin password
+```
+From there you can:
+- See all tenants with their status + each agent's run-state (running/paused/stopped).
+- **Create a tenant** and assign the email(s) and phone(s) that belong to them. It starts
+  `pending`; it flips to `active` automatically the first time that person messages in.
+- Add/remove emails and phones for a tenant.
+- **Pause / stop / resume** any single agent (a paused agent logs but takes no action;
+  inbound for it is parked).
+- Review a tenant's recent messages and tasks.
+
+### Onboarding a new person (the normal flow)
+1. In the admin webapp, **create a tenant** and add their email (and/or phone).
+2. Tell them to **email `assistant@jmkn.tech` from that address** (or WhatsApp the number).
+3. Their first message onboards them — they get a welcome and can start using their agent.
+
+### Third-party replies + the 3-hour window
+When an agent emails someone **on a tenant's behalf**, it sends from a tagged address
+(`assistant+<tenant>@jmkn.tech`). If that person replies, the agent reads it and relays a
+summary to the tenant owner. The third party can keep conversing **only for 3 hours after
+their first reply**; after that their messages are blocked (they get one "this conversation
+has closed" note). If the agent emails them again later, a fresh 3-hour window opens.
+
+### What's isolated per tenant
+Long-term memory, RAG documents, scheduled tasks/reminders, run-state, and message logs —
+all scoped by tenant. Verified with a live two-tenant leak test (one tenant cannot see the
+other's tasks or documents).
+
+### Known limitation
+**WhatsApp for *new* people** is rough: WhatsApp now delivers a rotating internal ID
+("LID") instead of the phone number, so registering someone by phone may not match their
+inbound. Email is the reliable channel for onboarding others today. (Fix would require the
+WhatsApp bridge to resolve and send the real phone number.)
+
+### Security reminders
+- The admin password and the WhatsApp bridge secret were shown in chat during setup —
+  **rotate both** (`gcloud secrets versions add admin-password --data-file=-`).
