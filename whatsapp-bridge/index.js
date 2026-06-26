@@ -190,11 +190,35 @@ async function start() {
       if (!m.message || m.key.fromMe) continue;
       const jid = m.key.remoteJid || "";
       if (jid.endsWith("@g.us")) continue; // DMs only for v1
-      const from = jid.replace("@s.whatsapp.net", "");
+      // WhatsApp (multi-device) may deliver a LID (…@lid) instead of the phone
+      // (…@s.whatsapp.net). Resolve BOTH so the gateway can route by the stable
+      // phone number, not just the rotating LID. The alternate JID on the key
+      // carries the other form; fall back to the LID→PN mapping store.
+      const jidAlt = m.key.remoteJidAlt || "";
+      const digits = (j) => (j || "").split("@")[0].replace(/\D/g, "");
+      let lid = "";
+      let pn = "";
+      for (const j of [jid, jidAlt]) {
+        if (j.endsWith("@lid")) lid = digits(j);
+        else if (j.endsWith("@s.whatsapp.net")) pn = digits(j);
+      }
+      if (!pn && lid) {
+        try {
+          const mapped = await sock.signalRepository?.lidMapping?.getPNForLID?.(
+            jid.endsWith("@lid") ? jid : jidAlt,
+          );
+          if (mapped) pn = digits(mapped);
+        } catch {
+          /* mapping unavailable */
+        }
+      }
+      const from = jid.replace("@s.whatsapp.net", ""); // back-compat (lid or phone)
       const text = extractText(m.message);
       const media = await extractMedia(m);
-      console.log(`inbound from ${from}: ${text.slice(0, 60)}${media ? " [media]" : ""}`);
-      await postInbound({ from, text, media, name: m.pushName || "" });
+      console.log(
+        `inbound from ${from} (pn:${pn || "-"} lid:${lid || "-"}): ${text.slice(0, 60)}${media ? " [media]" : ""}`,
+      );
+      await postInbound({ from, pn, lid, text, media, name: m.pushName || "" });
     }
   });
 }

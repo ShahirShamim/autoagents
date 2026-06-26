@@ -151,6 +151,29 @@ def _route_sender(channel: str, sender: str) -> tuple[str | None, str]:
     return tenant_id, "active"
 
 
+def _route_wa(pn: str, lid: str, frm: str) -> tuple[str | None, str, str]:
+    """Resolve an inbound WhatsApp sender by phone first, then LID, then raw.
+
+    WhatsApp (multi-device) delivers a rotating LID rather than the phone, so we
+    try the phone number — stable, and how tenants are normally registered —
+    before the LID and the raw ``from``. Returns (tenant_id, disposition,
+    matched_value); disposition matches ``_route_sender``'s vocabulary.
+    """
+    for cand in (pn, lid, tenancy.normalize_phone(frm)):
+        if not cand:
+            continue
+        tid = tenancy.resolve_tenant("whatsapp", cand)
+        if not tid:
+            continue
+        status = (tenancy.tenant_config(tid) or {}).get("status", "active")
+        if status == "pending":
+            return tid, "onboard", cand
+        if status != "active":
+            return tid, "reject", cand
+        return tid, "active", cand
+    return None, "reject", ""
+
+
 def _session_state(tenant_id: str) -> dict[str, str]:
     """Session state the agent's tools read via ToolContext to scope per tenant."""
     tcfg = tenancy.tenant_config(tenant_id) or {}
@@ -375,6 +398,10 @@ async def inbound_whatsapp(request: Request) -> Response:
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
     sender = str(payload.get("from", ""))
+    # WhatsApp may deliver a rotating LID instead of the phone; the bridge now
+    # forwards both, so route by the (stable) phone number when we have it.
+    pn = tenancy.normalize_phone(str(payload.get("pn", "")))
+    lid = tenancy.normalize_phone(str(payload.get("lid", "")))
     text = payload.get("text") or ""
     media = payload.get("media")
 
@@ -388,7 +415,7 @@ async def inbound_whatsapp(request: Request) -> Response:
             }
         ]
 
-    tenant_id, disp = _route_sender("whatsapp", sender)
+    tenant_id, disp, _matched = _route_wa(pn, lid, sender)
 
     clients.log_message(
         channel="whatsapp",
@@ -404,6 +431,13 @@ async def inbound_whatsapp(request: Request) -> Response:
     if disp == "reject":
         log.info("rejecting unknown/inactive whatsapp sender %s", sender)
         return Response(status_code=200, content="unknown sender")
+
+    # Capture any identity we don't have yet (the LID for a phone-registered
+    # tenant, or the phone for a LID-registered one) so future messages route
+    # correctly even when the LID rotates.
+    for _val in (pn, lid):
+        if _val and not tenancy.resolve_tenant("whatsapp", _val):
+            tenancy.add_identity(tenant_id, "whatsapp", _val)
 
     if disp == "onboard":
         tenancy.activate_tenant(tenant_id)

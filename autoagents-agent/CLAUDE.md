@@ -27,7 +27,15 @@ Run `agents-cli infra single-project` then `agents-cli data-ingestion`. See the 
 Run `uv run pytest tests/unit tests/integration`. Fix issues until all tests pass.
 
 ### Phase 5: Deploy to Dev
-**Requires explicit human approval.** Run `agents-cli deploy` only after user confirms. See the **Deployment Guide** for details.
+**Requires explicit human approval.** Deploy with `./deploy.sh` only after user confirms. See the **Deployment Guide** for details.
+
+> **Runtime config lives in Secret Manager** (`resend-api-key`,
+> `whatsapp-bridge-secret`, `whatsapp-bridge-url`), wired in as `secretEnv`.
+> `secretEnv` is sticky — it survives every deploy, including a bare
+> `agents-cli deploy` — so the bridge URL can no longer be wiped (the old bug
+> where WhatsApp failed with "WhatsApp bridge not configured"). Prefer
+> `./deploy.sh`. If the bridge IP changes, update the `whatsapp-bridge-url`
+> secret (see `deploy.sh` header), don't touch env vars.
 
 ### Phase 6: Production Deployment
 Ask the user: Option A (simple single-project) or Option B (full CI/CD pipeline with `agents-cli infra cicd`).
