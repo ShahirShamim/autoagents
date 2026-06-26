@@ -87,6 +87,19 @@ def run_badge(state: str) -> str:
     return f"<span class='badge {cls}'>{esc(state)}</span>"
 
 
+def fmt_n(n: object) -> str:
+    return f"{int(n or 0):,}"
+
+
+def usage_cost(agg: dict[str, int]) -> float | None:
+    """Estimated USD cost, or None when no rates are configured (tokens-only)."""
+    if not (config.LLM_INPUT_COST_PER_1M or config.LLM_OUTPUT_COST_PER_1M):
+        return None
+    return (agg["prompt"] / 1e6) * config.LLM_INPUT_COST_PER_1M + (
+        (agg["output"] + agg["thoughts"]) / 1e6
+    ) * config.LLM_OUTPUT_COST_PER_1M
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
@@ -136,22 +149,28 @@ def logout() -> Response:
 def index(request: Request) -> Response:
     if not _authed(request):
         return _redirect("/login")
+    by_usage, grand = tenancy.all_usage()
     rows = ""
     for t in tenancy.list_tenants():
         tid = t.get("id", "")
         emails = ", ".join(t.get("emails", []) or []) or "—"
         phones = ", ".join(t.get("phones", []) or []) or "—"
+        u = by_usage.get(tid, {"turns": 0, "total": 0})
         rows += (
             f"<tr><td><a href='/t/{esc(tid)}'>{esc(tid)}</a></td>"
             f"<td>{esc(t.get('name',''))}</td>"
             f"<td>{lifecycle_badge(t.get('status',''))}</td>"
             f"<td>{run_badge(tenancy.get_run_state(tid))}</td>"
+            f"<td>{fmt_n(u['total'])}</td>"
+            f"<td>{fmt_n(u['turns'])}</td>"
             f"<td class=muted>{esc(emails)}</td>"
             f"<td class=muted>{esc(phones)}</td></tr>"
         )
     body = (
         "<div class=bar><h1>Tenants</h1><a href='/logout'>Sign out</a></div>"
-        "<table><tr><th>ID<th>Name<th>Status<th>Agent<th>Emails<th>Phones</tr>"
+        f"<p class=muted>All tenants: <b>{fmt_n(grand['total'])}</b> tokens over "
+        f"<b>{fmt_n(grand['turns'])}</b> agent turns.</p>"
+        "<table><tr><th>ID<th>Name<th>Status<th>Agent<th>Tokens<th>Turns<th>Emails<th>Phones</tr>"
         f"{rows}</table>"
         "<h2>New tenant</h2>"
         "<form method=post action='/tenants' class=card>"
@@ -195,6 +214,33 @@ def tenant_detail(request: Request, tid: str) -> Response:
     if not t:
         return page("Not found", f"<p>No tenant <code>{esc(tid)}</code>.</p><a href='/'>Back</a>")
     run = tenancy.get_run_state(tid)
+
+    usage = tenancy.tenant_usage(tid)
+    counts = tenancy.tenant_counts(tid)
+    cost = usage_cost(usage)
+    if cost is not None:
+        cost_row = (
+            f"<tr><th>Est. cost</th><td>${cost:,.4f} "
+            f"<span class=muted>(in ${config.LLM_INPUT_COST_PER_1M}/1M, "
+            f"out ${config.LLM_OUTPUT_COST_PER_1M}/1M)</span></td></tr>"
+        )
+    else:
+        cost_row = (
+            "<tr><th>Est. cost</th><td class=muted>set LLM_INPUT_COST_PER_1M / "
+            "LLM_OUTPUT_COST_PER_1M to show $</td></tr>"
+        )
+    analytics_html = (
+        "<h2>Analytics</h2><table>"
+        f"<tr><th>Agent turns</th><td>{fmt_n(usage['turns'])}</td></tr>"
+        f"<tr><th>Input tokens</th><td>{fmt_n(usage['prompt'])}</td></tr>"
+        f"<tr><th>Output tokens</th><td>{fmt_n(usage['output'] + usage['thoughts'])} "
+        f"<span class=muted>(incl. {fmt_n(usage['thoughts'])} thinking)</span></td></tr>"
+        f"<tr><th>Total tokens</th><td>{fmt_n(usage['total'])}</td></tr>"
+        f"{cost_row}"
+        f"<tr><th>Messages logged</th><td>{fmt_n(counts['messages'])}</td></tr>"
+        f"<tr><th>Tasks</th><td>{fmt_n(counts['tasks'])}</td></tr>"
+        "</table>"
+    )
 
     def id_rows(items: list[str], channel: str) -> str:
         out = ""
@@ -245,6 +291,7 @@ def tenant_detail(request: Request, tid: str) -> Response:
         f"<div class=bar><h1>{esc(tid)} — {esc(t.get('name',''))}</h1><a href='/'>← all tenants</a></div>"
         f"<p>Lifecycle: {lifecycle_badge(t.get('status',''))} &nbsp; Agent: {run_badge(run)}</p>"
         f"<p class=muted>RAG corpus: {esc(t.get('rag_corpus','') or '— none assigned —')}</p>"
+        f"{analytics_html}"
         f"<h2>Agent run-state</h2><p>{state_btn('running')}{state_btn('paused')}{state_btn('stopped')}</p>"
         f"<h2>Lifecycle status</h2><p>{life_btn('pending')}{life_btn('active')}{life_btn('disabled')}</p>"
         f"<h2>Email identities</h2><table>{id_rows(t.get('emails',[]),'email')}</table>"

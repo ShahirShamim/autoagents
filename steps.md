@@ -265,3 +265,13 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
   owner number (got a Baileys message id). Inspect engine env via the REST API
   (`GET …/reasoningEngines/<id>` → spec.deploymentSpec.env/secretEnv); `gcloud ai
   reasoning-engines` does not exist in this CLI.
+- 2026-06-26 — **Per-tenant analytics in admin.** Gateway `query_agent` now sums each turn's
+  `usage_metadata` across all LLM events (prompt/candidates/thoughts/total) and writes a
+  `usage/{id}` record `{tenant_id, model, *_tokens, ts}` (best-effort, never blocks a reply).
+  Admin: index shows a Tokens + Turns column per tenant and a grand total (one `all_usage`
+  pass); tenant detail has an **Analytics** section (turns, input / output-incl-thinking /
+  total tokens, messages, tasks). Cost is **env-gated** — set `LLM_INPUT_COST_PER_1M` /
+  `LLM_OUTPUT_COST_PER_1M` on the admin service to surface an estimated $ (tokens-only until
+  then, since gemini-3.5-flash rates are unknown). Counts via Firestore `count()` aggregation.
+  Meters from now on (no historical backfill). gateway rev 00014-vkn, admin rev 00002-xbh,
+  `usage(tenant_id, ts)` index added. Verified live: a real turn recorded 25,057 tokens.

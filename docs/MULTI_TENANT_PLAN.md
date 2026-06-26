@@ -337,6 +337,14 @@ All phases shipped + verified live. Deployables: Agent Runtime brain (tenant-awa
   agent-tool sends are tenant-tagged); tag gateway sends too if you want fully complete audit
   attribution.
 
+### Post-build additions
+- **Per-tenant analytics (2026-06-26):** gateway records each turn's token usage to a `usage`
+  collection; admin shows per-tenant tokens/turns + totals (cost env-gated via
+  `LLM_INPUT_COST_PER_1M` / `LLM_OUTPUT_COST_PER_1M`). See `steps.md` + the guides.
+- **WhatsApp agent-send fix (2026-06-26):** set `WHATSAPP_BRIDGE_URL` on the engine — Agent
+  Runtime ignores `.env`; runtime config is engine `env`/`secretEnv` (`--update-env-vars` /
+  `--secrets`).
+
 ---
 
 ## Cross-cutting

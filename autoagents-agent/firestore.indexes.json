@@ -41,6 +41,14 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "last_at", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "usage",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tenant_id", "order": "ASCENDING" },
+        { "fieldPath": "ts", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -409,3 +409,17 @@ persist across redeploys). Inspect the live engine with the REST API
 → `spec.deploymentSpec.env` / `secretEnv` (there is no `gcloud ai reasoning-engines` command).
 Example bug: WhatsApp sends failed because `WHATSAPP_BRIDGE_URL` was never set on the engine
 (the secret was) — editing `.env` did nothing.
+
+### ANALYTICS (per-tenant token usage)
+- **Capture (gateway `query_agent`):** sum `usage_metadata` across every event in a turn
+  (tool steps = multiple LLM calls, each with its own metadata) → `clients.record_usage` writes
+  `usage/{id} = {tenant_id, model, prompt_tokens, output_tokens, thoughts_tokens, total_tokens, ts}`.
+  Best-effort; never blocks the reply. Meters forward only (no backfill).
+- **Admin aggregation (`admin/tenancy.py`):** `tenant_usage(tid)` sums a tenant's records;
+  `all_usage()` is one pass → per-tenant + grand totals (index roll-up); `_count()` uses Firestore
+  `count()` aggregation (stream fallback) for message/task counts.
+- **Cost (`admin/config.py`):** `LLM_INPUT_COST_PER_1M` / `LLM_OUTPUT_COST_PER_1M` (USD/1M tokens).
+  Both 0 → tokens-only (no $). Cost = in_rate·prompt + out_rate·(output+thoughts); thinking tokens
+  bill as output. Set on the admin service (`gcloud run services update … --update-env-vars`).
+- Index `usage(tenant_id, ts)` exists for future time-series queries; the admin's reads don't
+  order_by, so they need no composite index.

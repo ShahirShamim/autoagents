@@ -132,3 +132,53 @@ def recent_tasks(tid: str, limit: int = 15) -> list[dict[str, Any]]:
     ]
     docs.sort(key=lambda t: t.get("due_at", ""))
     return docs[:limit]
+
+
+# --------------------------------------------------------------------------- #
+# Analytics (per-tenant token usage + counts)
+# --------------------------------------------------------------------------- #
+def _count(col: str, tid: str) -> int:
+    """Count docs in `col` for a tenant (server-side aggregation, stream fallback)."""
+    q = db().collection(col).where("tenant_id", "==", tid)
+    try:
+        agg = q.count().get()
+        return int(agg[0][0].value)
+    except Exception:  # noqa: BLE001
+        return sum(1 for _ in q.stream())
+
+
+def tenant_usage(tid: str) -> dict[str, int]:
+    """Aggregate token usage for a tenant across all recorded agent turns."""
+    agg = {"turns": 0, "prompt": 0, "output": 0, "thoughts": 0, "total": 0}
+    for d in db().collection(config.COL_USAGE).where("tenant_id", "==", tid).stream():
+        r = d.to_dict()
+        agg["turns"] += 1
+        agg["prompt"] += int(r.get("prompt_tokens", 0))
+        agg["output"] += int(r.get("output_tokens", 0))
+        agg["thoughts"] += int(r.get("thoughts_tokens", 0))
+        agg["total"] += int(r.get("total_tokens", 0))
+    return agg
+
+
+def tenant_counts(tid: str) -> dict[str, int]:
+    """Message + task counts for a tenant."""
+    return {
+        "messages": _count(config.COL_MESSAGES, tid),
+        "tasks": _count(config.COL_TASKS, tid),
+    }
+
+
+def all_usage() -> tuple[dict[str, dict[str, int]], dict[str, int]]:
+    """One pass over the usage collection → (per-tenant totals, grand total)."""
+    by: dict[str, dict[str, int]] = {}
+    grand = {"turns": 0, "total": 0}
+    for d in db().collection(config.COL_USAGE).stream():
+        r = d.to_dict()
+        t = r.get("tenant_id", "?")
+        a = by.setdefault(t, {"turns": 0, "total": 0})
+        tot = int(r.get("total_tokens", 0))
+        a["turns"] += 1
+        a["total"] += tot
+        grand["turns"] += 1
+        grand["total"] += tot
+    return by, grand

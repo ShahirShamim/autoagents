@@ -146,6 +146,26 @@ def ensure_tenant_corpus(tenant_id: str) -> str:
         return ""
 
 
+def record_usage(tenant_id: str, model: str, usage: dict[str, int]) -> None:
+    """Record one agent turn's token usage for per-tenant analytics (best-effort)."""
+    if usage.get("total", 0) <= 0:
+        return
+    try:
+        db().collection(config.COL_USAGE).document(uuid.uuid4().hex).set(
+            {
+                "tenant_id": tenant_id,
+                "model": model or "",
+                "prompt_tokens": int(usage.get("prompt", 0)),
+                "output_tokens": int(usage.get("output", 0)),
+                "thoughts_tokens": int(usage.get("thoughts", 0)),
+                "total_tokens": int(usage.get("total", 0)),
+                "ts": now_iso(),
+            }
+        )
+    except Exception:  # noqa: BLE001 - analytics must never break a reply
+        log.exception("record_usage failed for %s", tenant_id)
+
+
 def latest_outbound_to(tenant_id: str, channel: str, contact: str) -> str:
     """ISO ts of the most recent outbound message this tenant sent to ``contact``.
 
@@ -414,6 +434,8 @@ def query_agent(
         outgoing = text
 
     chunks: list[str] = []
+    usage = {"prompt": 0, "output": 0, "thoughts": 0, "total": 0}
+    model_version = ""
     for event in engine.stream_query(
         user_id=user_id, session_id=session_id, message=outgoing
     ):
@@ -423,8 +445,18 @@ def query_agent(
             text_part = part.get("text") if isinstance(part, dict) else None
             if text_part:
                 chunks.append(text_part)
+        # Accumulate token usage across every LLM call in this turn (tool steps
+        # produce multiple events, each with its own usage_metadata).
+        um = ev.get("usage_metadata") or ev.get("usageMetadata")
+        if isinstance(um, dict):
+            usage["prompt"] += int(um.get("prompt_token_count", 0) or 0)
+            usage["output"] += int(um.get("candidates_token_count", 0) or 0)
+            usage["thoughts"] += int(um.get("thoughts_token_count", 0) or 0)
+            usage["total"] += int(um.get("total_token_count", 0) or 0)
+        model_version = model_version or ev.get("model_version", "") or ""
     reply = "".join(chunks).strip() or "(no response)"
 
+    record_usage(user_id, model_version, usage)
     _store_memory(engine, user_id, session_id)
     return reply
 

@@ -58,6 +58,7 @@ COL_MESSAGES = "messages"
 COL_TASKS = "tasks"
 COL_STATE = "agent_state"
 COL_CONTACTS = "contacts"
+COL_USAGE = "usage"  # per-turn token-usage records, keyed by tenant_id
 STATE_DOC_ID = "singleton"
 
 # --- Multi-tenant registry (Phase 1) ---

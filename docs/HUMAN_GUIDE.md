@@ -558,6 +558,24 @@ other's tasks or documents).
 inbound. Email is the reliable channel for onboarding others today. (Fix would require the
 WhatsApp bridge to resolve and send the real phone number.)
 
+### Per-tenant analytics
+The admin webapp meters each agent's usage:
+- **Tenants list** — a Tokens and Turns column per tenant, plus a grand total across everyone.
+- **A tenant's page → Analytics** — agent turns, input tokens, output tokens (including the
+  model's "thinking" tokens), total tokens, and message/task counts.
+
+It starts counting from when the feature went live (no backfill of older activity).
+
+**Showing estimated cost ($).** By default only token counts show (so no wrong-looking
+dollar figure). Once you know the model's per-million-token rates, turn on cost without a
+redeploy:
+```
+gcloud run services update autoagents-admin --region us-central1 \
+  --update-env-vars LLM_INPUT_COST_PER_1M=<input-rate>,LLM_OUTPUT_COST_PER_1M=<output-rate>
+```
+An estimated cost then appears on each tenant's page. (Memory and document storage aren't
+metered separately — they're negligible next to LLM token usage, which is the real cost.)
+
 ### Security reminders
 - The admin password and the WhatsApp bridge secret were shown in chat during setup —
   **rotate both** (`gcloud secrets versions add admin-password --data-file=-`).
