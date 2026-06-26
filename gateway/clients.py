@@ -382,13 +382,48 @@ def _memory_facts(engine: Any, user_id: str, query: str) -> list[str]:
     return facts
 
 
-def _store_memory(engine: Any, user_id: str, session_id: str) -> None:
-    """Persist the current session to the user's long-term memory (best-effort)."""
+def _store_memory(engine: Any, user_id: str, session_id: str) -> bool:
+    """Persist a session to the user's long-term memory. Returns True on success.
+
+    Called after every turn (best-effort) and again before a session is rotated
+    out — there the return value gates the rotation so memory is never dropped.
+    """
     try:
         sess = engine.get_session(user_id=user_id, session_id=session_id)
         _run_async(engine.async_add_session_to_memory(session=sess))
+        return True
     except Exception:  # noqa: BLE001
-        pass
+        return False
+
+
+def _idle_expired(last_at: str, now: dt.datetime) -> bool:
+    """True if `last_at` (ISO) is older than the session idle window."""
+    try:
+        prev = dt.datetime.fromisoformat(last_at)
+    except Exception:  # noqa: BLE001 - unparseable → don't force a rotation
+        return False
+    return (now - prev) > dt.timedelta(hours=config.SESSION_IDLE_HOURS)
+
+
+def _latest_matching_session(engine: Any, user_id: str, want: str | None) -> str | None:
+    """The user's most recent session id, if its state matches `want` (else None).
+
+    Used once to adopt a pre-existing session into the pointer (graceful first run).
+    """
+    try:
+        sessions = engine.list_sessions(user_id=user_id)
+        items = sessions.get("sessions", []) if isinstance(sessions, dict) else sessions
+        if not items:
+            return None
+        first = items[0]
+        sid = first.get("id") if isinstance(first, dict) else first.id
+        if not want:
+            return sid
+        got = engine.get_session(user_id=user_id, session_id=sid)
+        st = (got.get("state") if isinstance(got, dict) else getattr(got, "state", {})) or {}
+        return sid if st.get("tenant_id") == want else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def query_agent(
@@ -462,13 +497,19 @@ def query_agent(
 
 
 def ensure_session(user_id: str, state: dict[str, Any] | None = None) -> str:
-    """Get or create an Agent Runtime session for a user, carrying tenant state.
+    """Get the user's active Agent Runtime session, rotating after idle time.
 
-    ``state`` (e.g. ``{"tenant_id": ..., "rag_corpus": ...}``) is written onto the
-    session at creation so the agent's tools can read it via ``ToolContext.state``
-    and scope themselves to the tenant. An existing session is reused only if it
-    already carries the same ``tenant_id`` — otherwise a fresh, correctly-scoped
-    session is created (self-heals pre-multitenant sessions).
+    A per-tenant pointer in Firestore (``agent_sessions/<user_id>`` =
+    ``{session_id, last_at}``) tracks the live session and its last activity:
+
+    - active (last used within ``SESSION_IDLE_HOURS``) → reuse it, bump ``last_at``;
+    - idle longer than the window → **flush the old session to long-term memory
+      first**; only if that succeeds do we create a fresh session (otherwise we
+      keep the old one so nothing is lost);
+    - no pointer yet → adopt the user's latest matching session, else create one.
+
+    ``state`` (``{tenant_id, rag_corpus}``) is written onto a newly created session
+    so the agent's tools can read it via ``ToolContext.state``.
     """
     if not config.AGENT_ENGINE_RESOURCE:
         return "local"
@@ -478,28 +519,39 @@ def ensure_session(user_id: str, state: dict[str, Any] | None = None) -> str:
     vertexai.init(project=config.PROJECT_ID, location=config.REGION)
     engine = agent_engines.get(config.AGENT_ENGINE_RESOURCE)
     want = (state or {}).get("tenant_id")
-    try:
-        sessions = engine.list_sessions(user_id=user_id)
-        items = sessions.get("sessions", []) if isinstance(sessions, dict) else sessions
-        if items:
-            first = items[0]
-            sid = first.get("id") if isinstance(first, dict) else first.id
-            if not want:
-                return sid
-            try:
-                got = engine.get_session(user_id=user_id, session_id=sid)
-                st = (
-                    got.get("state") if isinstance(got, dict)
-                    else getattr(got, "state", {})
-                ) or {}
-                if st.get("tenant_id") == want:
-                    return sid
-            except Exception:  # noqa: BLE001
-                pass
-    except Exception:  # noqa: BLE001
-        pass
+    now = dt.datetime.now(dt.UTC)
+    nowi = now.isoformat()
+    pref = db().collection(config.COL_SESSIONS).document(user_id)
+    ptr = pref.get().to_dict() or {}
+    sid = ptr.get("session_id")
+    last_at = ptr.get("last_at")
+
+    if sid and last_at and not _idle_expired(last_at, now):
+        # Still active — reuse and record this activity.
+        pref.set({"last_at": nowi}, merge=True)
+        return sid
+
+    if sid and last_at:
+        # Idle past the window: guarantee memory is captured before rotating.
+        if not _store_memory(engine, user_id, sid):
+            log.warning("session %s memory flush failed; keeping it (no rotate)", sid)
+            pref.set({"last_at": nowi}, merge=True)
+            return sid
+        # flushed → fall through and create a fresh session
+
+    if not sid:
+        # First run for this tenant: adopt an existing matching session if any.
+        adopted = _latest_matching_session(engine, user_id, want)
+        if adopted:
+            pref.set(
+                {"session_id": adopted, "last_at": nowi, "tenant_id": user_id}, merge=True
+            )
+            return adopted
+
     created = engine.create_session(user_id=user_id, state=state or {})
-    return created.get("id") if isinstance(created, dict) else created.id
+    new_sid = created.get("id") if isinstance(created, dict) else created.id
+    pref.set({"session_id": new_sid, "last_at": nowi, "tenant_id": user_id})
+    return new_sid
 
 
 def _debug_dump(obj: Any) -> str:

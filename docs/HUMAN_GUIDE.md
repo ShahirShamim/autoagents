@@ -576,6 +576,13 @@ gcloud run services update autoagents-admin --region us-central1 \
 An estimated cost then appears on each tenant's page. (Memory and document storage aren't
 metered separately — they're negligible next to LLM token usage, which is the real cost.)
 
+### Conversation sessions
+Each person's agent keeps one running conversation (so it remembers the immediate back-and-forth).
+After **8 hours of no messages**, the next message starts a fresh session — but only after the
+old conversation's takeaways are saved to the agent's long-term memory first, so nothing is
+forgotten. This keeps token usage (and cost) from creeping up as history piles up. Change the
+window by setting `SESSION_IDLE_HOURS` on the gateway service.
+
 ### Security reminders
 - The admin password and the WhatsApp bridge secret were shown in chat during setup —
   **rotate both** (`gcloud secrets versions add admin-password --data-file=-`).

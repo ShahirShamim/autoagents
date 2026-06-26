@@ -275,3 +275,11 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
   then, since gemini-3.5-flash rates are unknown). Counts via Firestore `count()` aggregation.
   Meters from now on (no historical backfill). gateway rev 00014-vkn, admin rev 00002-xbh,
   `usage(tenant_id, ts)` index added. Verified live: a real turn recorded 25,057 tokens.
+- 2026-06-26 — **Session idle rotation.** `ensure_session` now tracks a per-tenant pointer
+  `agent_sessions/<tenant> = {session_id, last_at}`: reuse while active (bump last_at); once
+  idle > SESSION_IDLE_HOURS (default 8, env), **flush the old session to long-term memory and
+  rotate ONLY if the flush succeeds** (else keep the old session — never lose memory); first run
+  adopts the tenant's existing session (no reset). Replaces the fragile `list_sessions()[0]`
+  reuse and caps unbounded session/token growth. `_store_memory` now returns bool to gate
+  rotation. Verified: reuse-while-active, and forced 9h-idle → memory flush + new session.
+  gateway rev 00015-46k.

@@ -423,3 +423,18 @@ Example bug: WhatsApp sends failed because `WHATSAPP_BRIDGE_URL` was never set o
   bill as output. Set on the admin service (`gcloud run services update … --update-env-vars`).
 - Index `usage(tenant_id, ts)` exists for future time-series queries; the admin's reads don't
   order_by, so they need no composite index.
+
+### SESSION LIFECYCLE (idle rotation)
+- `ensure_session(user_id, state)` is the single entry point (called by every handler +
+  `/tasks/run`). Source of truth = Firestore pointer `agent_sessions/<user_id> =
+  {session_id, last_at}` (point lookup, no index).
+- **Reuse** if `now - last_at <= SESSION_IDLE_HOURS` (config, default 8) → bump `last_at`.
+- **Rotate** when idle exceeds the window: call `_store_memory(old)` FIRST; rotate (create a
+  new stateful session, repoint) only if it returns True. If the flush fails, keep the old
+  session and just bump `last_at` — memory is never dropped to start a new session.
+- **First run / no pointer:** adopt the tenant's latest state-matching session via
+  `_latest_matching_session` (graceful, no history reset), else create.
+- Memory is still flushed after EVERY turn in `query_agent` (`_store_memory`, now returns bool);
+  the rotation flush is the extra guarantee at the boundary.
+- Why: caps unbounded session history (the main prompt-token cost driver — see Analytics) and
+  removes reliance on `list_sessions()[0]` ordering.

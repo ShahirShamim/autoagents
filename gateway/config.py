@@ -59,7 +59,13 @@ COL_TASKS = "tasks"
 COL_STATE = "agent_state"
 COL_CONTACTS = "contacts"
 COL_USAGE = "usage"  # per-turn token-usage records, keyed by tenant_id
+COL_SESSIONS = "agent_sessions"  # per-tenant active-session pointer {session_id, last_at}
 STATE_DOC_ID = "singleton"
+
+# Start a fresh Agent Runtime session once a tenant has been idle this long. On
+# rotation the old session is flushed to long-term memory first (and rotation is
+# skipped if that flush fails, so nothing is lost).
+SESSION_IDLE_HOURS = int(os.environ.get("SESSION_IDLE_HOURS", "8"))
 
 # --- Multi-tenant registry (Phase 1) ---
 COL_TENANTS = "tenants"
