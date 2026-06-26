@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 
+import requests
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -239,13 +240,33 @@ async def create_tenant(
 
 
 @app.get("/t/{tid}", response_class=HTMLResponse)
-def tenant_detail(request: Request, tid: str) -> Response:
+def tenant_detail(request: Request, tid: str, wa: str = "") -> Response:
     if not _authed(request):
         return _redirect("/login")
     t = tenancy.get_tenant(tid)
     if not t:
         return page("Not found", f"<p>No tenant <code>{esc(tid)}</code>.</p><a href='/'>Back</a>")
     run = tenancy.get_run_state(tid)
+
+    wa_linked = bool(t.get("wa_linked")) and bool(t.get("wa_number"))
+    wa_status = (
+        f"<span class='badge b-green'>linked</span> <span class=muted>{esc(t.get('wa_number',''))}</span>"
+        if wa_linked
+        else "<span class='badge b-grey'>not linked</span>"
+    )
+    wa_flash = {
+        "sent": "<span class='badge b-green'>link emailed ✓</span>",
+        "noemail": "<span class='badge b-orange'>tenant has no email on file</span>",
+        "err": "<span class='badge b-red'>send failed</span>",
+    }.get(wa, "")
+    wa_html = (
+        "<h2>WhatsApp</h2>"
+        f"<p>Status: {wa_status} &nbsp; {wa_flash}</p>"
+        f"<form class=inline method=post action='/t/{esc(tid)}/wa-link'>"
+        "<button type=submit>Send WhatsApp link</button></form>"
+        " <span class=muted>— emails the tenant a private QR-pairing link to "
+        "link/change their number.</span>"
+    )
 
     usage = tenancy.tenant_usage(tid)
     counts = tenancy.tenant_counts(tid)
@@ -324,6 +345,7 @@ def tenant_detail(request: Request, tid: str) -> Response:
         f"<p>Lifecycle: {lifecycle_badge(t.get('status',''))} &nbsp; Agent: {run_badge(run)}</p>"
         f"<p class=muted>RAG corpus: {esc(t.get('rag_corpus','') or '— none assigned —')}</p>"
         f"{render_alerts(tenancy.tenant_alerts(tid), '/t/' + tid)}"
+        f"{wa_html}"
         f"{analytics_html}"
         f"<h2>Agent run-state</h2><p>{state_btn('running')}{state_btn('paused')}{state_btn('stopped')}</p>"
         f"<h2>Lifecycle status</h2><p>{life_btn('pending')}{life_btn('active')}{life_btn('disabled')}</p>"
@@ -375,6 +397,28 @@ async def edit_lifecycle(request: Request, tid: str, status: str = Form(...)) ->
     if status in ("pending", "active", "disabled"):
         tenancy.set_tenant_status(tid, status)
     return _redirect(f"/t/{tid}")
+
+
+@app.post("/t/{tid}/wa-link")
+async def send_wa_link(request: Request, tid: str) -> Response:
+    if not _authed(request):
+        return _redirect("/login")
+    flash = "err"
+    if tenancy.get_tenant(tid):
+        try:
+            r = requests.post(
+                config.GATEWAY_URL.rstrip("/") + f"/internal/wa-link/{tid}",
+                headers={"X-Tasks-Token": config.TASKS_TOKEN},
+                timeout=20,
+            )
+            data = r.json() if r.content else {}
+            if data.get("emailed"):
+                flash = "sent"
+            elif not data.get("to"):
+                flash = "noemail"
+        except Exception:  # noqa: BLE001
+            flash = "err"
+    return _redirect(f"/t/{tid}?wa={flash}")
 
 
 @app.post("/alerts/{aid}/resolve")

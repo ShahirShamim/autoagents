@@ -223,7 +223,9 @@ def send_whatsapp(
         resp = requests.post(
             config.WHATSAPP_BRIDGE_URL.rstrip("/") + "/send",
             headers={"X-WA-Secret": config.WHATSAPP_BRIDGE_SECRET},
-            json={"to": to, "text": text},
+            # The bridge holds one WhatsApp account per tenant; tenant selects the
+            # session so the message goes out from this tenant's own number.
+            json={"tenant": tenant_id, "to": to, "text": text},
             timeout=30,
         )
         ok = resp.status_code in (200, 201)

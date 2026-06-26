@@ -13,6 +13,12 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 COOKIE_NAME = "aa_admin"
 SESSION_MAX_AGE = 60 * 60 * 8  # 8 hours
+
+# Gateway (for the "Send WhatsApp link" action, which the gateway mints + emails).
+GATEWAY_URL = os.environ.get(
+    "GATEWAY_URL", "https://autoagents-gateway-323512451403.us-central1.run.app"
+)
+TASKS_TOKEN = os.environ.get("TASKS_TOKEN", "")
 # The service is private (accessed via `gcloud run services proxy`), so the
 # browser talks to http://localhost — a Secure cookie wouldn't survive that.
 # Set COOKIE_SECURE=true only if you later expose the app over public HTTPS.

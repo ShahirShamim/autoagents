@@ -121,6 +121,22 @@ def primary_email(tenant_id: str) -> str:
     return emails[0] if emails else ""
 
 
+def primary_whatsapp(tenant_id: str) -> str:
+    """A WhatsApp address to reach the tenant owner: their first registered phone,
+    else a linked whatsapp identity value (e.g. a LID)."""
+    cfg = tenant_config(tenant_id) or {}
+    phones = cfg.get("phones") or []
+    if phones:
+        return normalize_phone(phones[0])
+    for d in (
+        clients.db().collection(config.COL_IDENTITIES).where("tenant_id", "==", tenant_id).stream()
+    ):
+        v = d.to_dict()
+        if v.get("channel") == "whatsapp" and v.get("value"):
+            return str(v["value"])
+    return ""
+
+
 # --------------------------------------------------------------------------- #
 # Third-party reply threads (Phase 4)
 # --------------------------------------------------------------------------- #

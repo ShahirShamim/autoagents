@@ -1,15 +1,18 @@
-// autoagents WhatsApp bridge — Baileys (unofficial WhatsApp Web, multi-device).
+// autoagents WhatsApp bridge — Baileys, MULTI-SESSION (one socket per tenant).
 //
-// Holds a persistent WhatsApp connection, persists auth creds to GCS so restarts
-// don't require re-pairing, forwards inbound messages to the gateway, and exposes
-// /send for outbound. QR pairing served at /qr (token-gated).
+// Each tenant links their own dedicated WhatsApp number by scanning a QR. The
+// bridge holds one Baileys socket per tenant, persists per-tenant auth creds to
+// GCS so restarts don't require re-pairing, forwards inbound (tagged with the
+// tenant) to the gateway, and exposes a tenant-scoped HTTP API for pairing and
+// sending. The account boundary IS the tenant boundary, so routing is trivial.
 //
 // Env:
 //   PORT                  (default 8080)
 //   GCS_BUCKET            bucket for auth creds + inbound media
-//   WA_AUTH_PREFIX        GCS prefix for creds (default wa-auth/)
+//   WA_AUTH_PREFIX        GCS prefix for creds (default wa-auth/); per tenant: wa-auth/<tenant>/
 //   GATEWAY_INBOUND_URL   POST target for inbound messages
-//   WA_SECRET             shared secret (X-WA-Secret header; also ?token= for /qr)
+//   WA_SECRET             shared secret (X-WA-Secret header on every endpoint)
+//   AUTH_DIR              local creds dir (default /data/auth); per tenant: <AUTH_DIR>/<tenant>
 import { mkdirSync, promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -36,53 +39,56 @@ const logger = pino({ level: "silent" });
 const storage = new Storage();
 const bucket = storage.bucket(BUCKET);
 
-let sock = null;
-let connected = false;
-let lastQrPng = null; // data: URL of the current pairing QR
+// tenantId -> { sock, connected, connecting, lastQr, number, saveCreds, backupTimer, backingUp }
+const sessions = new Map();
 
-// ---------- GCS-backed auth persistence ----------
-async function restoreAuth() {
-  mkdirSync(AUTH_DIR, { recursive: true });
-  const [files] = await bucket.getFiles({ prefix: AUTH_PREFIX });
+const digits = (j) => String(j || "").split("@")[0].split(":")[0].replace(/\D/g, "");
+const tenantPrefix = (t) => `${AUTH_PREFIX}${t}/`;
+const tenantDir = (t) => path.join(AUTH_DIR, t);
+
+// ---------- GCS-backed per-tenant auth persistence ----------
+async function restoreAuth(tenant) {
+  const dir = tenantDir(tenant);
+  mkdirSync(dir, { recursive: true });
+  const [files] = await bucket.getFiles({ prefix: tenantPrefix(tenant) });
   for (const f of files) {
-    const name = f.name.slice(AUTH_PREFIX.length);
+    const name = f.name.slice(tenantPrefix(tenant).length);
     if (!name) continue;
-    await f.download({ destination: path.join(AUTH_DIR, name) });
+    await f.download({ destination: path.join(dir, name) });
   }
-  console.log(`restored ${files.length} auth file(s) from gs://${BUCKET}/${AUTH_PREFIX}`);
+  console.log(`[${tenant}] restored ${files.length} auth file(s)`);
 }
 
-// Baileys fires creds.update very frequently (every pre-key). Debounce the
-// whole-dir backup and upload sequentially with simple (non-resumable) uploads
-// so we don't flood the 1GB e2-micro / GCS with parallel requests.
-let backupTimer = null;
-let backingUp = false;
-
-function scheduleBackup() {
-  if (backupTimer || backingUp) return;
-  backupTimer = setTimeout(runBackup, 8000);
+// Baileys fires creds.update very frequently; debounce the per-tenant whole-dir
+// backup and upload sequentially (non-resumable) so we don't flood the VM / GCS.
+function scheduleBackup(tenant) {
+  const s = sessions.get(tenant);
+  if (!s || s.backupTimer || s.backingUp) return;
+  s.backupTimer = setTimeout(() => runBackup(tenant), 8000);
 }
 
-async function runBackup() {
-  backupTimer = null;
-  backingUp = true;
+async function runBackup(tenant) {
+  const s = sessions.get(tenant);
+  if (!s) return;
+  s.backupTimer = null;
+  s.backingUp = true;
   try {
-    const names = await fs.readdir(AUTH_DIR);
+    const names = await fs.readdir(tenantDir(tenant));
     for (const n of names) {
-      await bucket.upload(path.join(AUTH_DIR, n), {
-        destination: AUTH_PREFIX + n,
+      await bucket.upload(path.join(tenantDir(tenant), n), {
+        destination: tenantPrefix(tenant) + n,
         resumable: false,
       });
     }
   } catch (e) {
-    console.error("auth backup failed", e.message);
+    console.error(`[${tenant}] auth backup failed`, e.message);
   }
-  backingUp = false;
+  s.backingUp = false;
 }
 
-async function clearAuth() {
-  await fs.rm(AUTH_DIR, { recursive: true, force: true }).catch(() => {});
-  const [files] = await bucket.getFiles({ prefix: AUTH_PREFIX });
+async function clearAuth(tenant) {
+  await fs.rm(tenantDir(tenant), { recursive: true, force: true }).catch(() => {});
+  const [files] = await bucket.getFiles({ prefix: tenantPrefix(tenant) });
   await Promise.all(files.map((f) => f.delete().catch(() => {})));
 }
 
@@ -103,7 +109,7 @@ async function postInbound(payload) {
 
 const MEDIA_TYPES = ["imageMessage", "videoMessage", "audioMessage", "documentMessage"];
 
-async function extractMedia(m) {
+async function extractMedia(m, sock) {
   const msg = m.message || {};
   for (const mt of MEDIA_TYPES) {
     if (!msg[mt]) continue;
@@ -138,13 +144,20 @@ function extractText(msg) {
   );
 }
 
-// ---------- WhatsApp socket ----------
-async function start() {
-  await restoreAuth();
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+// ---------- per-tenant WhatsApp socket ----------
+// Guarded entry: won't create a duplicate while one is connected/connecting.
+async function start(tenant) {
+  const ex = sessions.get(tenant);
+  if (ex && (ex.connected || ex.connecting)) return ex;
+  return _connect(tenant);
+}
+
+async function _connect(tenant) {
+  await restoreAuth(tenant);
+  const { state, saveCreds } = await useMultiFileAuthState(tenantDir(tenant));
   const { version } = await fetchLatestBaileysVersion();
 
-  sock = makeWASocket({
+  const sock = makeWASocket({
     version,
     auth: state,
     logger,
@@ -153,33 +166,46 @@ async function start() {
     syncFullHistory: false,
   });
 
+  const s = {
+    sock,
+    connected: false,
+    connecting: true,
+    lastQr: null,
+    number: "",
+    saveCreds,
+  };
+  sessions.set(tenant, s);
+
   sock.ev.on("creds.update", async () => {
     await saveCreds();
-    scheduleBackup();
+    scheduleBackup(tenant);
   });
 
   sock.ev.on("connection.update", async (u) => {
     const { connection, lastDisconnect, qr } = u;
     if (qr) {
-      lastQrPng = await qrcode.toDataURL(qr);
-      connected = false;
-      console.log("QR ready — open /qr to scan");
+      s.lastQr = await qrcode.toDataURL(qr);
+      console.log(`[${tenant}] QR ready`);
     }
     if (connection === "open") {
-      connected = true;
-      lastQrPng = null;
-      console.log("WhatsApp connected");
+      s.connected = true;
+      s.connecting = false;
+      s.lastQr = null;
+      s.number = digits(sock.user?.id || "");
+      console.log(`[${tenant}] connected as ${s.number}`);
     }
     if (connection === "close") {
-      connected = false;
+      s.connected = false;
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
-        console.log("logged out — clearing creds; re-pair via /qr");
-        await clearAuth();
-        setTimeout(start, 2000);
+        console.log(`[${tenant}] logged out — clearing creds`);
+        s.connecting = false;
+        await clearAuth(tenant);
+        sessions.delete(tenant);
       } else {
-        console.log(`connection closed (${code}); reconnecting`);
-        setTimeout(start, 3000);
+        console.log(`[${tenant}] connection closed (${code}); reconnecting`);
+        s.connecting = true; // keep guarded while we retry
+        setTimeout(() => _connect(tenant), 3000);
       }
     }
   });
@@ -189,13 +215,10 @@ async function start() {
     for (const m of messages) {
       if (!m.message || m.key.fromMe) continue;
       const jid = m.key.remoteJid || "";
-      if (jid.endsWith("@g.us")) continue; // DMs only for v1
-      // WhatsApp (multi-device) may deliver a LID (…@lid) instead of the phone
-      // (…@s.whatsapp.net). Resolve BOTH so the gateway can route by the stable
-      // phone number, not just the rotating LID. The alternate JID on the key
-      // carries the other form; fall back to the LID→PN mapping store.
+      if (jid.endsWith("@g.us")) continue; // DMs only
+      // Resolve both the LID (…@lid) and the real phone (…@s.whatsapp.net) so the
+      // gateway can identify the owner vs a third-party contact on this socket.
       const jidAlt = m.key.remoteJidAlt || "";
-      const digits = (j) => (j || "").split("@")[0].replace(/\D/g, "");
       let lid = "";
       let pn = "";
       for (const j of [jid, jidAlt]) {
@@ -212,15 +235,37 @@ async function start() {
           /* mapping unavailable */
         }
       }
-      const from = jid.replace("@s.whatsapp.net", ""); // back-compat (lid or phone)
+      const from = jid.replace("@s.whatsapp.net", "");
       const text = extractText(m.message);
-      const media = await extractMedia(m);
+      const media = await extractMedia(m, sock);
       console.log(
-        `inbound from ${from} (pn:${pn || "-"} lid:${lid || "-"}): ${text.slice(0, 60)}${media ? " [media]" : ""}`,
+        `[${tenant}] inbound from ${from} (pn:${pn || "-"} lid:${lid || "-"}): ${text.slice(0, 50)}${media ? " [media]" : ""}`,
       );
-      await postInbound({ from, pn, lid, text, media, name: m.pushName || "" });
+      await postInbound({ tenant, from, pn, lid, text, media, name: m.pushName || "" });
     }
   });
+
+  return s;
+}
+
+// Restore + start every tenant that already has creds in GCS.
+async function startAll() {
+  const [files] = await bucket.getFiles({ prefix: AUTH_PREFIX });
+  const tenants = new Set();
+  for (const f of files) {
+    const rest = f.name.slice(AUTH_PREFIX.length); // "<tenant>/creds.json"
+    if (!rest.includes("/")) continue; // ignore stray top-level files (no tenant dir)
+    const t = rest.split("/")[0];
+    if (t) tenants.add(t);
+  }
+  console.log(`restoring ${tenants.size} tenant session(s): ${[...tenants].join(", ") || "none"}`);
+  for (const t of tenants) {
+    try {
+      await start(t);
+    } catch (e) {
+      console.error(`start ${t} failed`, e.message);
+    }
+  }
 }
 
 // ---------- HTTP server ----------
@@ -231,32 +276,71 @@ function authed(req) {
   return WA_SECRET && req.get("X-WA-Secret") === WA_SECRET;
 }
 
-app.get("/health", (_req, res) => res.json({ status: "ok", connected }));
+app.get("/health", (_req, res) => res.json({ status: "ok", sessions: sessions.size }));
 
-app.get("/qr", async (req, res) => {
-  if (WA_SECRET && req.query.token !== WA_SECRET) return res.status(401).send("unauthorized");
-  if (connected) return res.send("<h2>WhatsApp already linked ✅</h2>");
-  if (!lastQrPng) return res.send("<h2>No QR yet — wait a few seconds and refresh.</h2>");
-  res.send(
-    `<html><body style="text-align:center;font-family:sans-serif">
-     <h2>Scan with WhatsApp → Linked devices → Link a device</h2>
-     <img src="${lastQrPng}" style="width:320px"/>
-     <p>Page auto-refreshes.</p>
-     <script>setTimeout(()=>location.reload(),8000)</script>
-     </body></html>`,
-  );
+app.post("/sessions/:tenant/start", async (req, res) => {
+  if (!authed(req)) return res.status(401).json({ error: "unauthorized" });
+  try {
+    const s = await start(req.params.tenant);
+    res.json({ tenant: req.params.tenant, connected: s.connected, hasQr: !!s.lastQr });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/sessions/:tenant", (req, res) => {
+  if (!authed(req)) return res.status(401).json({ error: "unauthorized" });
+  const s = sessions.get(req.params.tenant);
+  res.json({
+    tenant: req.params.tenant,
+    connected: !!s?.connected,
+    number: s?.number || "",
+    hasQr: !!s?.lastQr,
+  });
+});
+
+app.get("/sessions/:tenant/qr", (req, res) => {
+  if (!authed(req)) return res.status(401).json({ error: "unauthorized" });
+  const s = sessions.get(req.params.tenant);
+  if (!s) return res.json({ connected: false, qr: null, number: "" });
+  res.json({ connected: s.connected, qr: s.connected ? null : s.lastQr, number: s.number || "" });
+});
+
+app.post("/sessions/:tenant/logout", async (req, res) => {
+  if (!authed(req)) return res.status(401).json({ error: "unauthorized" });
+  const t = req.params.tenant;
+  const s = sessions.get(t);
+  try {
+    if (s?.sock) {
+      try {
+        await s.sock.logout();
+      } catch {
+        /* socket may already be down */
+      }
+    }
+    await clearAuth(t);
+    sessions.delete(t);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.post("/send", async (req, res) => {
   if (!authed(req)) return res.status(401).json({ error: "unauthorized" });
-  if (!connected || !sock) return res.status(503).json({ error: "not connected" });
-  const { to, text } = req.body || {};
-  if (!to || !text) return res.status(400).json({ error: "to and text required" });
+  const { tenant, to, text } = req.body || {};
+  if (!tenant || !to || !text) {
+    return res.status(400).json({ error: "tenant, to and text required" });
+  }
+  const s = sessions.get(tenant);
+  if (!s || !s.connected || !s.sock) {
+    return res.status(503).json({ error: "tenant session not connected" });
+  }
   const jid = String(to).includes("@")
     ? String(to)
     : String(to).replace(/\D/g, "") + "@s.whatsapp.net";
   try {
-    const r = await sock.sendMessage(jid, { text: String(text) });
+    const r = await s.sock.sendMessage(jid, { text: String(text) });
     res.json({ ok: true, id: r?.key?.id || "" });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -264,7 +348,4 @@ app.post("/send", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`bridge http on :${PORT}`));
-start().catch((e) => {
-  console.error("start failed", e);
-  process.exit(1);
-});
+startAll().catch((e) => console.error("startAll failed", e.message));

@@ -263,8 +263,12 @@ def send_email(to: str, subject: str, body: str) -> dict[str, Any]:
     return {"ok": ok, "id": data.get("id", ""), "raw": data}
 
 
-def send_whatsapp(to: str, text: str) -> dict[str, Any]:
-    """Send a WhatsApp message via the Baileys bridge and log it."""
+def send_whatsapp(tenant: str, to: str, text: str) -> dict[str, Any]:
+    """Send a WhatsApp message from ``tenant``'s own linked socket via the bridge.
+
+    The bridge holds one WhatsApp account per tenant, so the message must be
+    routed to the right session — ``tenant`` selects it. Logged per tenant.
+    """
     if not (config.WHATSAPP_BRIDGE_URL and config.WHATSAPP_BRIDGE_SECRET):
         return {"ok": False, "error": "whatsapp bridge not configured"}
     ok = False
@@ -273,7 +277,7 @@ def send_whatsapp(to: str, text: str) -> dict[str, Any]:
         r = requests.post(
             config.WHATSAPP_BRIDGE_URL.rstrip("/") + "/send",
             headers={"X-WA-Secret": config.WHATSAPP_BRIDGE_SECRET},
-            json={"to": to, "text": text},
+            json={"tenant": tenant, "to": to, "text": text},
             timeout=30,
         )
         ok = r.ok
@@ -288,10 +292,59 @@ def send_whatsapp(to: str, text: str) -> dict[str, Any]:
             recipient=to,
             body=text,
             status="sent" if ok else "error",
+            tenant_id=tenant,
         )
     except Exception:  # noqa: BLE001 - logging must not mask a real send
         pass
     return {"ok": ok, "id": data.get("id", ""), "raw": data}
+
+
+# --------------------------------------------------------------------------- #
+# WhatsApp bridge session control (per-tenant linking / pairing)
+# --------------------------------------------------------------------------- #
+def _bridge(method: str, path: str) -> dict[str, Any]:
+    if not (config.WHATSAPP_BRIDGE_URL and config.WHATSAPP_BRIDGE_SECRET):
+        return {"error": "whatsapp bridge not configured"}
+    try:
+        fn = requests.post if method == "POST" else requests.get
+        r = fn(
+            config.WHATSAPP_BRIDGE_URL.rstrip("/") + path,
+            headers={"X-WA-Secret": config.WHATSAPP_BRIDGE_SECRET},
+            timeout=20,
+        )
+        return r.json() if r.content else {}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+def wa_session_status(tenant: str) -> dict[str, Any]:
+    return _bridge("GET", f"/sessions/{tenant}")
+
+
+def wa_session_start(tenant: str) -> dict[str, Any]:
+    return _bridge("POST", f"/sessions/{tenant}/start")
+
+
+def wa_session_qr(tenant: str) -> dict[str, Any]:
+    return _bridge("GET", f"/sessions/{tenant}/qr")
+
+
+def wa_session_logout(tenant: str) -> dict[str, Any]:
+    return _bridge("POST", f"/sessions/{tenant}/logout")
+
+
+def record_wa_link(tenant: str, number: str) -> None:
+    """Mark a tenant's WhatsApp as linked + store the connected number."""
+    db().collection(config.COL_TENANTS).document(tenant).set(
+        {"wa_linked": True, "wa_number": number, "wa_linked_at": now_iso()}, merge=True
+    )
+
+
+def clear_wa_link(tenant: str) -> None:
+    """Mark a tenant's WhatsApp as unlinked."""
+    db().collection(config.COL_TENANTS).document(tenant).set(
+        {"wa_linked": False, "wa_number": "", "wa_unlinked_at": now_iso()}, merge=True
+    )
 
 
 def fetch_inbound_email(email_id: str) -> dict[str, Any]:
