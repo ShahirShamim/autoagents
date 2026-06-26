@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <!-- Light Background -->
+  <rect width="100%" height="100%" fill="#F5F5F7" />
+  
+  <defs>
+    <!-- MacBook Gold Gradient -->
+    <linearGradient id="macbook-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE082" />
+      <stop offset="40%" stop-color="#FFC107" />
+      <stop offset="100%" stop-color="#FF8F00" />
+    </linearGradient>
+
+    <!-- Drop Shadow for Keycaps in Light Mode -->
+    <filter id="key-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.08" />
+    </filter>
+    
+    <!-- Subtle Gold Backlight Glow -->
+    <filter id="gold-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Logo Mark Container (Centered) -->
+  <g transform="translate(142, 120)">
+    
+    <!-- Keyboard Bezel (Light Silver Well) -->
+    <rect x="-10" y="-15" width="245" height="220" rx="12" fill="#EFEFEF" fill-opacity="0.6" stroke="url(#macbook-gold)" stroke-width="1.5" />
+    
+    <!-- KEYCAP: J -->
+    <g transform="translate(30, 0)" filter="url(#key-shadow)">
+      <!-- Keycap Body (Flat, matte black, sharp corner-radius) -->
+      <rect x="0" y="0" width="90" height="90" rx="8" fill="#1C1C1E" stroke="#2C2C2E" stroke-width="1.5" />
+      <!-- Legend (Top-Left aligned, medium weight, Apple System-like font) -->
+      <text x="16" y="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="500" fill="#D1D1D6">J</text>
+    </g>
+
+    <!-- KEYCAP: K -->
+    <g transform="translate(130, 0)" filter="url(#key-shadow)">
+      <rect x="0" y="0" width="90" height="90" rx="8" fill="#1C1C1E" stroke="#2C2C2E" stroke-width="1.5" />
+      <text x="16" y="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="500" fill="#D1D1D6">K</text>
+    </g>
+
+    <!-- KEYCAP: N -->
+    <g transform="translate(5, 100)" filter="url(#key-shadow)">
+      <rect x="0" y="0" width="90" height="90" rx="8" fill="#1C1C1E" stroke="#2C2C2E" stroke-width="1.5" />
+      <text x="16" y="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="500" fill="#D1D1D6">N</text>
+    </g>
+
+    <!-- KEYCAP: M (Highlighted with Gold/Yellow) -->
+    <g transform="translate(105, 100)" filter="url(#key-shadow)">
+      <!-- Backlight Glow -->
+      <rect x="-2" y="-2" width="94" height="94" rx="10" fill="none" stroke="url(#macbook-gold)" stroke-width="2" opacity="0.3" filter="url(#gold-glow)" />
+      <!-- Keycap Body -->
+      <rect x="0" y="0" width="90" height="90" rx="8" fill="#1C1C1E" stroke="url(#macbook-gold)" stroke-width="1.5" />
+      <!-- Legend in Gold -->
+      <text x="16" y="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="600" fill="url(#macbook-gold)">M</text>
+    </g>
+
+  </g>
+
+  <!-- Typography Brand -->
+  <text x="250" y="375" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Roboto, sans-serif" font-size="32" font-weight="800" letter-spacing="3" text-anchor="middle">
+    <tspan fill="#1D1D1F">JMKN </tspan>
+    <tspan fill="url(#macbook-gold)">Tech</tspan>
+  </text>
+</svg>

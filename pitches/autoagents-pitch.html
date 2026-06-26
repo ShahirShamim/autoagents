@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>autoagents · a JMKN briefing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --jmkn-bg-primary:#F5F5F7;
+  --jmkn-bg-card:rgba(255,255,255,0.8);
+  --jmkn-bg-well:#FFFFFF;
+  --jmkn-gold-primary:#FFC107;
+  --jmkn-gold-gradient:linear-gradient(135deg,#FFE082 0%,#FFC107 40%,#FF8F00 100%);
+  --jmkn-cyan:#0EA5C4;
+  --jmkn-cyan-gradient:linear-gradient(135deg,#52C5D9 0%,#0EA5C4 100%);
+  --jmkn-cyan-glow:rgba(14,165,196,0.10);
+  --jmkn-border:#D2D2D7;
+  --jmkn-text-primary:#1D1D1F;
+  --jmkn-text-secondary:#515154;
+  --jmkn-text-muted:#86868B;
+  --jmkn-shadow:0 10px 30px rgba(0,0,0,0.04);
+  --jmkn-shadow-hover:0 20px 40px rgba(0,0,0,0.08),0 0 20px rgba(14,165,196,0.08);
+  --svg-key-bg:#1C1C1E; --svg-key-border:#2C2C2E; --svg-key-legend:#D1D1D6;
+  --jmkn-font:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --jmkn-mono:'JetBrains Mono','SF Mono',monospace;
+  --r-lg:20px; --r-sm:8px; --t:.4s;
+  --wa-screen:#E7DED5; --wa-head:#075E54; --wa-in:#FFFFFF; --wa-out:#D9FDD3;
+  --wa-ink:#111B21; --wa-sub:rgba(17,27,33,.55); --wa-bezel:#0A0A0C;
+}
+[data-theme="dark"]{
+  --jmkn-bg-primary:#09090C;
+  --jmkn-bg-card:rgba(18,18,26,0.7);
+  --jmkn-bg-well:#12121A;
+  --jmkn-cyan:#92E2EC;
+  --jmkn-cyan-gradient:linear-gradient(135deg,#BDEDF3 0%,#92E2EC 100%);
+  --jmkn-cyan-glow:rgba(146,226,236,0.16);
+  --jmkn-border:#21222D;
+  --jmkn-text-primary:#FFFFFF;
+  --jmkn-text-secondary:#FFF8E7;
+  --jmkn-text-muted:#8E8E93;
+  --jmkn-shadow:none;
+  --jmkn-shadow-hover:0 20px 40px rgba(0,0,0,0.4),0 0 25px var(--jmkn-cyan-glow);
+  --wa-screen:#0B141A; --wa-head:#1F2C34; --wa-in:#1F2C34; --wa-out:#144D37;
+  --wa-ink:#E9EDEF; --wa-sub:rgba(233,237,239,.6); --wa-bezel:#000;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--jmkn-font);background:var(--jmkn-bg-primary);
+  color:var(--jmkn-text-secondary);-webkit-font-smoothing:antialiased;
+  transition:background var(--t) ease,color var(--t) ease}
+.orb{position:fixed;border-radius:50%;filter:blur(140px);z-index:0;opacity:.16;pointer-events:none;transition:background var(--t) ease}
+.orb-c{width:520px;height:520px;background:var(--jmkn-cyan);top:-140px;left:-120px}
+.orb-g{width:560px;height:560px;background:var(--jmkn-gold-primary);bottom:-200px;right:-160px}
+
+.deck{position:relative;z-index:1;height:100vh;overflow-y:scroll;scroll-snap-type:y mandatory;scroll-behavior:smooth}
+.slide{height:100vh;width:100%;scroll-snap-align:center;position:relative;
+  display:flex;flex-direction:column;justify-content:center;padding:7vh 8vw;overflow:hidden}
+.split{display:grid;grid-template-columns:1.05fr .95fr;gap:5vw;align-items:center}
+.split .copy{min-width:0}
+.split .visual{display:flex;justify-content:center;align-items:center}
+
+.eyebrow{font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--jmkn-cyan);margin-bottom:14px}
+h1.title{font-size:40px;font-weight:500;letter-spacing:-0.02em;line-height:1.1;color:var(--jmkn-text-primary);max-width:18ch}
+.rule{width:60px;height:2px;background:var(--jmkn-gold-gradient);margin:16px 0 24px;border-radius:2px}
+
+ul.points{list-style:none;max-width:58ch}
+ul.points li{position:relative;padding-left:26px;margin-bottom:13px;font-size:16px;font-weight:400;line-height:1.5;color:var(--jmkn-text-secondary)}
+ul.points li::before{content:"";position:absolute;left:0;top:10px;width:12px;height:2px;background:var(--jmkn-gold-primary);border-radius:2px}
+ul.points li b{color:var(--jmkn-text-primary);font-weight:500}
+
+.foot{position:absolute;left:8vw;bottom:3.4vh;display:flex;align-items:center;gap:9px;font-size:12px;color:var(--jmkn-text-muted)}
+.foot .mk{width:18px;height:18px}
+.page{position:absolute;right:8vw;bottom:3.4vh;font-family:var(--jmkn-mono);font-size:12px;color:var(--jmkn-text-muted);letter-spacing:.04em}
+
+.hero h1{font-size:60px;font-weight:500;letter-spacing:-0.03em;color:var(--jmkn-text-primary);line-height:1}
+.hero .logo{width:62px;height:62px;margin-bottom:22px}
+.hero .tag{font-size:23px;font-weight:400;color:var(--jmkn-text-secondary);margin-top:15px;max-width:22ch}
+.hero .tag em{font-style:normal;color:var(--jmkn-cyan);font-weight:500}
+.hero .sub{font-size:16px;font-weight:400;color:var(--jmkn-text-muted);margin-top:20px;max-width:48ch;line-height:1.6}
+.hero .by{margin-top:24px;font-size:13px;color:var(--jmkn-text-muted);display:flex;align-items:center;gap:8px}
+.hero .by a{color:var(--jmkn-cyan);text-decoration:none;font-weight:500}
+
+.lead{font-size:22px;font-weight:500;letter-spacing:-0.01em;color:var(--jmkn-text-primary);max-width:30ch}
+.lead-sub{font-size:15.5px;font-weight:400;color:var(--jmkn-text-secondary);margin:12px 0 18px;max-width:46ch;line-height:1.6}
+
+.timeline{margin-top:8px;display:flex;flex-direction:column;gap:11px;max-width:52ch}
+.row{display:flex;gap:16px;align-items:flex-start}
+.time{flex:0 0 72px;text-align:center;padding:7px 0;border-radius:var(--r-sm);background:var(--jmkn-bg-card);border:1px solid var(--jmkn-border);font-family:var(--jmkn-mono);font-size:13px;font-weight:500;color:var(--jmkn-cyan);box-shadow:var(--jmkn-shadow)}
+.row .l b{display:block;font-size:15.5px;font-weight:500;color:var(--jmkn-text-primary);margin-bottom:2px}
+.row .l span{font-size:13.5px;font-weight:400;color:var(--jmkn-text-secondary);line-height:1.45}
+
+.close .steps{margin:8px 0 0;display:flex;flex-direction:column;gap:13px;max-width:46ch}
+.close .steps div{font-size:16px;font-weight:400;color:var(--jmkn-text-secondary);padding-left:26px;position:relative}
+.close .steps div::before{content:"";position:absolute;left:0;top:10px;width:12px;height:2px;background:var(--jmkn-gold-primary);border-radius:2px}
+.close .steps b{color:var(--jmkn-text-primary);font-weight:500}
+.cta{margin-top:26px;display:inline-flex;align-items:center;gap:12px}
+.btn-gold{background:var(--jmkn-gold-gradient);border:none;padding:13px 28px;border-radius:26px;color:#1D1D1F;font-size:15px;font-weight:500;font-family:var(--jmkn-font);cursor:pointer;box-shadow:0 6px 20px rgba(181,148,16,0.18);transition:transform .3s cubic-bezier(.16,1,.3,1),box-shadow .3s ease}
+.btn-gold:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(181,148,16,0.28)}
+.cta .ghost{font-size:14px;color:var(--jmkn-text-muted)}
+
+/* ---------------- PHONE + WHATSAPP MOCKUP ---------------- */
+.phone{width:272px;border-radius:38px;background:var(--wa-bezel);padding:11px;
+  box-shadow:0 30px 60px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.04);position:relative;animation:float 6s ease-in-out infinite}
+.phone.sm{width:224px;border-radius:32px;padding:9px;animation:none}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+.phone .notch{position:absolute;top:18px;left:50%;transform:translateX(-50%);width:78px;height:6px;border-radius:6px;background:rgba(255,255,255,.18);z-index:3}
+.screen{border-radius:28px;overflow:hidden;background:var(--wa-screen);height:540px;display:flex;flex-direction:column}
+.phone.sm .screen{height:430px;border-radius:24px}
+.wa-head{background:var(--wa-head);color:#fff;display:flex;align-items:center;gap:10px;padding:30px 14px 12px}
+.phone.sm .wa-head{padding:26px 12px 10px}
+.wa-av{width:34px;height:34px;border-radius:50%;background:#0A2E2A;display:flex;align-items:center;justify-content:center;flex:0 0 34px}
+.wa-av svg{width:24px;height:24px}
+.wa-id{display:flex;flex-direction:column;line-height:1.2}
+.wa-id b{font-size:14px;font-weight:500}
+.wa-id span{font-size:11px;opacity:.8}
+.wa-body{flex:1;padding:14px 12px;display:flex;flex-direction:column;gap:9px;overflow:hidden;
+  background-image:radial-gradient(rgba(0,0,0,.025) 1px,transparent 1px);background-size:16px 16px}
+[data-theme="dark"] .wa-body{background-image:radial-gradient(rgba(255,255,255,.03) 1px,transparent 1px)}
+.bubble{max-width:82%;padding:8px 11px;border-radius:12px;font-size:13px;line-height:1.4;color:var(--wa-ink);position:relative;box-shadow:0 1px 1px rgba(0,0,0,.08)}
+.bubble.in{background:var(--wa-in);align-self:flex-start;border-top-left-radius:3px}
+.bubble.out{background:var(--wa-out);align-self:flex-end;border-top-right-radius:3px}
+.bubble .meta{display:block;text-align:right;font-size:10px;color:var(--wa-sub);margin-top:3px}
+.bubble .tick{color:#53BDEB;font-weight:600}
+.bubble .tag{display:inline-block;font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--jmkn-cyan);font-weight:600;margin-bottom:3px}
+.voice{display:flex;align-items:center;gap:9px;min-width:168px;flex-wrap:wrap}
+.play{width:26px;height:26px;border-radius:50%;background:var(--wa-head);flex:0 0 26px;display:flex;align-items:center;justify-content:center}
+.play::before{content:"";border-left:9px solid #fff;border-top:6px solid transparent;border-bottom:6px solid transparent;margin-left:2px}
+.wave{flex:1;display:flex;align-items:center;gap:2px;height:22px;min-width:84px}
+.wave i{flex:1;background:currentColor;opacity:.45;border-radius:2px;height:30%}
+.wave i:nth-child(3n){height:80%}.wave i:nth-child(4n){height:55%}.wave i:nth-child(5n){height:95%}.wave i:nth-child(7n){height:40%}.wave i:nth-child(2n){height:65%}
+.voice .dur{font-size:10px;color:var(--wa-sub);flex:0 0 auto}
+.voice .tag{flex:0 0 100%}
+.img-b{padding:5px 5px 7px}
+.thumb{width:168px;height:104px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:34px;background:linear-gradient(135deg,#52C5D9,#0EA5C4);color:#fff}
+.thumb.warm{background:var(--jmkn-gold-gradient)}
+.phone.sm .thumb{width:150px;height:94px;font-size:30px}
+.img-b .cap{display:block;font-size:11.5px;margin-top:5px;padding:0 3px;color:var(--wa-ink)}
+
+.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:18px;justify-items:center}
+.gcol{display:flex;flex-direction:column;align-items:center;gap:11px}
+.glabel{text-align:center}
+.glabel b{display:block;font-size:15px;font-weight:500;color:var(--jmkn-text-primary)}
+.glabel span{font-size:12.5px;color:var(--jmkn-text-muted)}
+
+.toggle{position:fixed;top:22px;right:24px;z-index:60;width:40px;height:40px;border-radius:50%;background:var(--jmkn-bg-card);border:1px solid var(--jmkn-border);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px);transition:all .3s ease}
+.toggle:hover{border-color:var(--jmkn-cyan);transform:translateY(-1px)}
+#counter{position:fixed;right:24px;bottom:18px;z-index:60;font-family:var(--jmkn-mono);font-size:12px;color:var(--jmkn-text-muted);background:var(--jmkn-bg-card);border:1px solid var(--jmkn-border);padding:6px 12px;border-radius:20px;backdrop-filter:blur(10px);letter-spacing:.04em}
+.hint{position:fixed;left:24px;bottom:20px;z-index:60;font-size:11px;color:var(--jmkn-text-muted);opacity:.7}
+
+@media print{
+  .deck{height:auto;overflow:visible}.slide{height:100vh;page-break-after:always;scroll-snap-align:none}
+  .toggle,#counter,.hint{display:none}.phone{animation:none}@page{size:landscape}
+}
+</style>
+</head>
+<body data-theme="light">
+
+<div class="orb orb-c"></div>
+<div class="orb orb-g"></div>
+
+<button class="toggle" onclick="toggleTheme()" aria-label="Toggle theme"><span id="ti">🌙</span></button>
+<div id="counter">01 / 13</div>
+<div class="hint">↑ ↓ / ← → / space</div>
+
+<svg style="display:none"><symbol id="logo" viewBox="0 0 500 440">
+  <defs><linearGradient id="macGold" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#FFE082"/><stop offset=".4" stop-color="#FFC107"/><stop offset="1" stop-color="#FF8F00"/>
+  </linearGradient></defs>
+  <rect x="55" y="35" width="390" height="360" rx="26" fill="var(--jmkn-bg-well)" stroke="var(--jmkn-gold-primary)" stroke-width="5" fill-opacity=".55"/>
+  <g font-family="Inter,sans-serif" font-weight="500" font-size="58" text-anchor="middle">
+    <rect x="110" y="80" width="130" height="130" rx="12" fill="var(--svg-key-bg)" stroke="var(--svg-key-border)" stroke-width="2.5"/><text x="175" y="165" fill="var(--svg-key-legend)">J</text>
+    <rect x="260" y="80" width="130" height="130" rx="12" fill="var(--svg-key-bg)" stroke="var(--svg-key-border)" stroke-width="2.5"/><text x="325" y="165" fill="var(--svg-key-legend)">K</text>
+    <rect x="80" y="230" width="130" height="130" rx="12" fill="var(--svg-key-bg)" stroke="var(--svg-key-border)" stroke-width="2.5"/><text x="145" y="315" fill="var(--svg-key-legend)">N</text>
+    <rect x="230" y="230" width="130" height="130" rx="12" fill="var(--svg-key-bg)" stroke="url(#macGold)" stroke-width="2.5"/><text x="295" y="315" fill="url(#macGold)">M</text>
+  </g>
+</symbol>
+<symbol id="wamark" viewBox="0 0 500 440">
+  <rect x="55" y="35" width="390" height="360" rx="26" fill="none" stroke="#FFC107" stroke-width="10"/>
+  <g font-family="Inter,sans-serif" font-weight="600" font-size="64" text-anchor="middle" fill="#FFC107">
+    <text x="175" y="170">J</text><text x="325" y="170">K</text><text x="145" y="320">N</text><text x="295" y="320">M</text>
+  </g>
+</symbol></svg>
+
+<div class="deck" id="deck">
+
+  <!-- 1 hero -->
+  <section class="slide hero split" id="s1">
+    <div class="copy">
+      <svg class="logo"><use href="#logo"/></svg>
+      <h1>autoagents</h1>
+      <div class="tag">Your followups and coordination, <em>handled.</em></div>
+      <div class="sub">A phone-first autonomous assistant that lives in WhatsApp and email.
+        Send a voice note. It does the rest.</div>
+      <div class="by">A JMKN briefing &nbsp;·&nbsp; <a href="https://jmkn.tech">jmkn.tech</a></div>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out voice"><span class="play"></span><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="dur">0:06</span><span class="meta">9:18 AM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">On it. Followed up with Bilal and the Lahore client. I’ll ping you the moment either replies.<span class="meta">9:18 AM</span></div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- 2 reality -->
+  <section class="slide split" id="s2">
+    <div class="copy">
+      <div class="eyebrow">The reality</div>
+      <h1 class="title">Your day already runs on WhatsApp and email</h1>
+      <div class="rule"></div>
+      <ul class="points">
+        <li><b>Every relationship needs a nudge.</b> Deals, hires, partners, vendors — each one waits on a followup from you.</li>
+        <li><b>The chasing never ends.</b> “Circling back”, “any update?”, “just reminding you” — all day.</li>
+        <li><b>It all lives in your head.</b> Who owes what, who went quiet, what to check next week.</li>
+        <li><b>You are the bottleneck.</b> There is simply no one to hold the threads but you.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out">Need to follow up with Bilal, Sana, the bank, the Karachi supplier, and the landlord today 😮‍💨<span class="meta">8:47 AM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">Noted all five. Want me to take the followups off your plate?<span class="meta">8:47 AM</span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">02 / 13</div>
+  </section>
+
+  <!-- 3 cost -->
+  <section class="slide split" id="s3">
+    <div class="copy">
+      <div class="eyebrow">What it costs you</div>
+      <h1 class="title">The followup that slips is the deal that dies</h1>
+      <div class="rule"></div>
+      <ul class="points">
+        <li><b>Hours every week</b> spent remembering, chasing, and re-reading old threads.</li>
+        <li><b>Warm leads go cold</b> because nobody circled back in time.</li>
+        <li><b>Relationships cool</b> when a promised followup quietly never happens.</li>
+        <li><b>Deep work shatters</b> under a constant drip of small coordinating messages.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble in">Heads up — Imran’s quote has had no reply in 5 days. These go cold fast.<span class="meta">9:02 AM</span></div>
+          <div class="bubble out">Chase it now, please.<span class="meta">9:03 AM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">Done — followed up and flagged it. I’ll watch for his reply.<span class="meta">9:03 AM</span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">03 / 13</div>
+  </section>
+
+  <!-- 4 meet -->
+  <section class="slide split" id="s4">
+    <div class="copy">
+      <div class="eyebrow">The solution</div>
+      <h1 class="title">Meet autoagents</h1>
+      <div class="rule"></div>
+      <div class="lead">A personal autonomous assistant that works where you already work.</div>
+      <div class="lead-sub">You delegate the chase. It does the rest — over WhatsApp and email, in plain language.</div>
+      <ul class="points">
+        <li><b>Follows up.</b> Chases replies for you, on schedule — politely and on-brand.</li>
+        <li><b>Reminds you.</b> Tells you who to reach out to, and who has gone quiet.</li>
+        <li><b>Reports back.</b> One digest: what landed, who replied, what needs you.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out">You handle the followups from now on.<span class="meta">9:10 AM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">Gladly. I’ll chase every open thread, remind you who to reach, and send you one daily digest of what came back.<span class="meta">9:10 AM</span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">04 / 13</div>
+  </section>
+
+  <!-- 5 phone-first / voice-first -->
+  <section class="slide split" id="s5">
+    <div class="copy">
+      <div class="eyebrow">Phone-first, voice-first</div>
+      <h1 class="title">Leave the laptop. You still don’t need it.</h1>
+      <div class="rule"></div>
+      <ul class="points">
+        <li><b>You don’t carry a laptop everywhere.</b> You carry your phone — so that’s where your assistant lives.</li>
+        <li><b>You’d rather talk than type.</b> Hold the mic, say what you need, send. It understands and acts.</li>
+        <li><b>Built for the thumb, not the desk.</b> No dashboards, no app to open — just your everyday WhatsApp.</li>
+        <li><b>From the car, lounge, or a site visit.</b> Delegate in ten seconds, hands almost free.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out voice"><span class="play"></span><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="dur">0:09</span><span class="meta">4:02 PM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">Got it. Reminder set for Thursday 4 PM to check the Lahore deal — and I’ll nudge them a day before.<span class="meta">4:02 PM</span></div>
+          <div class="bubble out">Perfect, thanks.<span class="meta">4:03 PM <span class="tick">✓✓</span></span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">05 / 13</div>
+  </section>
+
+  <!-- 6 any language / voice + images -->
+  <section class="slide split" id="s6">
+    <div class="copy">
+      <div class="eyebrow">Speak or snap · any language</div>
+      <h1 class="title">Voice notes and photos — it just understands</h1>
+      <div class="rule"></div>
+      <ul class="points">
+        <li><b>Voice in any language.</b> Urdu, Punjabi, English, mixed — say it your way; it gets the intent.</li>
+        <li><b>Send a photo, not a paragraph.</b> A business card, receipt, or whiteboard — it reads and acts on it.</li>
+        <li><b>Replies in clean English.</b> However you speak to it, it answers crisp and to the point.</li>
+        <li><b>No format friction.</b> Text, voice, image, PDF — whatever’s fastest in the moment.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out voice"><span class="tag">Voice · Urdu</span><span class="play"></span><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="dur">0:11</span><span class="meta">10:24 AM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">Understood. I’ve emailed the supplier in English and CC’d you on the thread.<span class="meta">10:24 AM</span></div>
+          <div class="bubble out img-b"><div class="thumb warm">🧾</div><span class="cap">receipt.jpg</span><span class="meta">10:25 AM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">Saved the receipt to your records — PKR 84,500, dated today. Want me to expense it?<span class="meta">10:25 AM</span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">06 / 13</div>
+  </section>
+
+  <!-- 7 capabilities -->
+  <section class="slide split" id="s7">
+    <div class="copy">
+      <div class="eyebrow">Capabilities</div>
+      <h1 class="title">What it does for you</h1>
+      <div class="rule"></div>
+      <ul class="points">
+        <li><b>Automatic followups.</b> Set it once; it sends the next nudge on time and keeps the thread alive.</li>
+        <li><b>Smart reminders.</b> “Time to reach out to Ahsan.” “Karachi still hasn’t replied.”</li>
+        <li><b>Inbound digest.</b> What arrived, who responded, and what now needs your call.</li>
+        <li><b>Never forgets.</b> Remembers your contacts, context, and preferences across every chat.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out">Remind me to call the bank Tuesday 10, and chase the Karachi PO.<span class="meta">5:31 PM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">Reminder set — Tue 10:00. I’ll chase the Karachi PO today. You have 3 other open followups; want the list?<span class="meta">5:31 PM</span></div>
+          <div class="bubble out">Yes please.<span class="meta">5:32 PM <span class="tick">✓✓</span></span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">07 / 13</div>
+  </section>
+
+  <!-- 8 use-case gallery -->
+  <section class="slide" id="s8">
+    <div class="eyebrow">In the wild</div>
+    <h1 class="title">How leaders use it</h1>
+    <div class="rule"></div>
+    <div class="gallery">
+      <div class="gcol">
+        <div class="phone sm"><div class="notch"></div><div class="screen">
+          <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div><div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+          <div class="wa-body">
+            <div class="bubble in">Ahsan hasn’t replied in 3 days. Want me to follow up?<span class="meta">8:05 AM</span></div>
+            <div class="bubble out">Yes, gently.<span class="meta">8:06 AM <span class="tick">✓✓</span></span></div>
+            <div class="bubble in">Done — sent a friendly nudge. I’ll tell you when he replies.<span class="meta">8:06 AM</span></div>
+          </div></div></div>
+        <div class="glabel"><b>It chases for you</b><span>Proactive followups</span></div>
+      </div>
+      <div class="gcol">
+        <div class="phone sm"><div class="notch"></div><div class="screen">
+          <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div><div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+          <div class="wa-body">
+            <div class="bubble out img-b"><div class="thumb">📇</div><span class="cap">card.jpg</span><span class="meta">1:12 PM <span class="tick">✓✓</span></span></div>
+            <div class="bubble in">Added Sara Khan (Meezan Foods) to your contacts. Email her the deck now?<span class="meta">1:12 PM</span></div>
+          </div></div></div>
+        <div class="glabel"><b>Snap to capture</b><span>Photo → contact + action</span></div>
+      </div>
+      <div class="gcol">
+        <div class="phone sm"><div class="notch"></div><div class="screen">
+          <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div><div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+          <div class="wa-body">
+            <div class="bubble in">Evening recap 🌙<br>· 4 followups sent<br>· 2 replies — Imran, Zara<br>· Tomorrow: call vendor, 11 AM<span class="meta">9:30 PM</span></div>
+          </div></div></div>
+        <div class="glabel"><b>One daily digest</b><span>Everything that moved</span></div>
+      </div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">08 / 13</div>
+  </section>
+
+  <!-- 9 a day with -->
+  <section class="slide split" id="s9">
+    <div class="copy">
+      <div class="eyebrow">A day in the life</div>
+      <h1 class="title">A day with autoagents</h1>
+      <div class="rule"></div>
+      <div class="timeline">
+        <div class="row"><div class="time">08:00</div><div class="l"><b>“Anyone I’m waiting on?”</b><span>It lists every open thread and flags who is overdue.</span></div></div>
+        <div class="row"><div class="time">12:30</div><div class="l"><b>A lead goes quiet.</b><span>It already followed up — and loops you in only when they reply.</span></div></div>
+        <div class="row"><div class="time">16:00</div><div class="l"><b>A voice note from the car.</b><span>“Remind me Thursday.” Done — you and them, nudged on time.</span></div></div>
+        <div class="row"><div class="time">21:00</div><div class="l"><b>One message lands.</b><span>Today’s followups, replies, and tomorrow’s actions.</span></div></div>
+      </div>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out">Anyone I’m waiting on?<span class="meta">8:00 AM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">3 people:<br>· Ahsan — 2 days<br>· the bank — 4 days<br>· Zara — today<br>Want me to nudge the first two?<span class="meta">8:00 AM</span></div>
+          <div class="bubble out">Yes.<span class="meta">8:01 AM <span class="tick">✓✓</span></span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">09 / 13</div>
+  </section>
+
+  <!-- 10 control -->
+  <section class="slide split" id="s10">
+    <div class="copy">
+      <div class="eyebrow">Trust &amp; safety</div>
+      <h1 class="title">You stay in control</h1>
+      <div class="rule"></div>
+      <ul class="points">
+        <li><b>It checks before it sends.</b> Anything sensitive or going to several people waits for your go-ahead.</li>
+        <li><b>Nothing leaves without you.</b> When it matters, no message goes out that you didn’t approve.</li>
+        <li><b>Private by design.</b> Your conversations and contacts are isolated to you — never shared.</li>
+        <li><b>Pause or stop anytime.</b> One word and it stands down. You are always the principal.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out">Message all 5 distributors about the new pricing.<span class="meta">11:40 AM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">That’s 5 messages. Here’s the text I’ll send each:<br><i>“Hi — sharing our updated pricing, effective July 1. Happy to walk you through it.”</i><br>Reply <b>send</b> and I’ll deliver all 5.<span class="meta">11:40 AM</span></div>
+          <div class="bubble out">send<span class="meta">11:41 AM <span class="tick">✓✓</span></span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">10 / 13</div>
+  </section>
+
+  <!-- 11 why it fits -->
+  <section class="slide split" id="s11">
+    <div class="copy">
+      <div class="eyebrow">Why it fits</div>
+      <h1 class="title">Built for how business runs here</h1>
+      <div class="rule"></div>
+      <ul class="points">
+        <li><b>WhatsApp is the boardroom.</b> The channel your clients, partners, and teams already live on.</li>
+        <li><b>Relationship-led, high-volume.</b> Dozens of warm threads at once — exactly what it holds.</li>
+        <li><b>Leverage without headcount.</b> Run like you have a chief of staff, without an ops team.</li>
+        <li><b>Local rhythm, always on.</b> Late-night messages and weekend deals — covered, round the clock.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble in">New reply on WhatsApp — Tariq (vendor):<br>“Yes, let’s proceed.”<span class="meta">7:14 PM</span></div>
+          <div class="bubble in">Want me to confirm and schedule the kickoff call?<span class="meta">7:14 PM</span></div>
+          <div class="bubble out">Yes — Thursday.<span class="meta">7:15 PM <span class="tick">✓✓</span></span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">11 / 13</div>
+  </section>
+
+  <!-- 12 outcome -->
+  <section class="slide split" id="s12">
+    <div class="copy">
+      <div class="eyebrow">The outcome</div>
+      <h1 class="title">What changes for you</h1>
+      <div class="rule"></div>
+      <ul class="points">
+        <li><b>Hours back, every week.</b> The chasing and remembering stop being your job.</li>
+        <li><b>No followup ever forgotten.</b> Every thread is held; every promise is kept.</li>
+        <li><b>Faster replies, more closed deals.</b> Speed and consistency win the relationship.</li>
+        <li><b>A chief of staff in your pocket.</b> You operate at a higher level.</li>
+      </ul>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble in">Your week with autoagents 📈<br>· 38 followups handled<br>· 11 replies, 0 dropped<br>· Time back: a few hours<span class="meta">Sun 6:00 PM</span></div>
+          <div class="bubble out">Love this.<span class="meta">6:02 PM <span class="tick">✓✓</span></span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · confidential</div><div class="page">12 / 13</div>
+  </section>
+
+  <!-- 13 close -->
+  <section class="slide close split" id="s13">
+    <div class="copy">
+      <div class="eyebrow">Next steps</div>
+      <h1 class="title">See it on your own WhatsApp</h1>
+      <div class="rule"></div>
+      <div class="steps">
+        <div><b>A live demo.</b> Send it a voice note and watch it follow up and report back — in real time.</div>
+        <div><b>A short pilot.</b> Point it at your actual followups for a week and feel the time come back.</div>
+        <div><b>Tailored to you.</b> Your contacts, your tone, your cadence.</div>
+      </div>
+      <div class="cta"><button class="btn-gold">Book a 20-minute demo</button><span class="ghost">jmkn.tech</span></div>
+    </div>
+    <div class="visual">
+      <div class="phone"><div class="notch"></div><div class="screen">
+        <div class="wa-head"><div class="wa-av"><svg viewBox="0 0 500 440"><use href="#wamark"/></svg></div>
+          <div class="wa-id"><b>autoagents</b><span>online</span></div></div>
+        <div class="wa-body">
+          <div class="bubble out">Let’s try it.<span class="meta">2:20 PM <span class="tick">✓✓</span></span></div>
+          <div class="bubble in">Great. Send me one thing you’re chasing — a voice note works — and watch me take it from there.<span class="meta">2:20 PM</span></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="foot"><svg class="mk"><use href="#logo"/></svg> autoagents · a JMKN solution</div><div class="page">13 / 13</div>
+  </section>
+
+</div>
+
+<script>
+  function toggleTheme(){
+    const b=document.body,cur=b.getAttribute('data-theme')||'light',nx=cur==='light'?'dark':'light';
+    b.setAttribute('data-theme',nx);document.getElementById('ti').textContent=nx==='light'?'🌙':'☀️';
+    try{localStorage.setItem('aa-theme',nx)}catch(e){}
+  }
+  (function(){let t='light';try{t=localStorage.getItem('aa-theme')||'light'}catch(e){}
+    document.body.setAttribute('data-theme',t);document.getElementById('ti').textContent=t==='light'?'🌙':'☀️';})();
+
+  const deck=document.getElementById('deck'),slides=Array.from(deck.querySelectorAll('.slide')),counter=document.getElementById('counter');
+  let i=0;
+  function go(n){i=Math.max(0,Math.min(slides.length-1,n));slides[i].scrollIntoView({behavior:'smooth'});}
+  function sync(){const idx=Math.round(deck.scrollTop/window.innerHeight);i=idx;
+    counter.textContent=String(idx+1).padStart(2,'0')+' / '+String(slides.length).padStart(2,'0');}
+  deck.addEventListener('scroll',()=>window.requestAnimationFrame(sync),{passive:true});
+  window.addEventListener('keydown',e=>{
+    if(['ArrowDown','ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();go(i+1);}
+    else if(['ArrowUp','ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();go(i-1);}
+    else if(e.key==='Home'){go(0);}else if(e.key==='End'){go(slides.length-1);}
+  });
+  sync();
+</script>
+</body>
+</html>

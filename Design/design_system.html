@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JMKN Tech | Brand Book & Design System</title>
+  
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --jmkn-bg-primary: #F5F5F7;          /* Apple silver background */
+      --jmkn-bg-card: rgba(255, 255, 255, 0.85);
+      --jmkn-bg-well: #FFFFFF;             /* Pure white well */
+      
+      --jmkn-gold-primary: #FFC107;        /* Vibrant MacBook Gold */
+      --jmkn-gold-gradient: linear-gradient(135deg, #FFE082 0%, #FFC107 40%, #FF8F00 100%);
+      
+      --jmkn-violet-primary: #0EA5C4;      /* Sky Cyan (light-mode contrast) */
+      --jmkn-violet-gradient: linear-gradient(135deg, #52C5D9 0%, #0EA5C4 100%);
+      --jmkn-violet-glow: rgba(14, 165, 196, 0.1);
+
+      --jmkn-border: #D2D2D7;              /* Apple clean silver border */
+
+      --jmkn-text-primary: #1D1D1F;        /* Deep obsidian text */
+      --jmkn-text-secondary: #515154;      /* Soft slate text */
+      --jmkn-text-muted: #86868B;          /* Muted gray */
+
+      --jmkn-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+      --jmkn-shadow-hover: 0 20px 40px rgba(0, 0, 0, 0.08), 0 0 20px rgba(14, 165, 196, 0.08);
+
+      --svg-key-bg: #1C1C1E;
+      --svg-key-border: #2C2C2E;
+      --svg-key-legend: #D1D1D6;
+      
+      --jmkn-font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --jmkn-font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+      
+      --jmkn-radius-large: 20px;
+      --jmkn-radius-small: 8px;
+      --transition-speed: 0.4s;
+    }
+
+    [data-theme="dark"] {
+      --jmkn-bg-primary: #09090C;          /* Obsidian dark background */
+      --jmkn-bg-card: rgba(18, 18, 26, 0.75);
+      --jmkn-bg-well: #12121A;             /* Charcoal well */
+      
+      --jmkn-gold-primary: #FFC107;        /* Bright gold for dark contrast */
+      --jmkn-gold-gradient: linear-gradient(135deg, #FFE082 0%, #FFC107 40%, #FF8F00 100%);
+      
+      --jmkn-violet-primary: #92E2EC;
+      --jmkn-violet-gradient: linear-gradient(135deg, #BDEDF3 0%, #92E2EC 100%);
+      --jmkn-violet-glow: rgba(146, 226, 236, 0.15);
+
+      --jmkn-border: #21222D;              /* Slate border */
+      
+      --jmkn-text-primary: #FFFFFF;
+      --jmkn-text-secondary: #FFF8E7;
+      --jmkn-text-muted: #8E8E93;
+      
+      --jmkn-shadow: none;
+      --jmkn-shadow-hover: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 25px var(--jmkn-violet-glow);
+
+      --svg-key-bg: #1C1C1E;
+      --svg-key-border: #2C2C2E;
+      --svg-key-legend: #D1D1D6;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--jmkn-bg-primary);
+      color: var(--jmkn-text-secondary);
+      font-family: var(--jmkn-font-family);
+      line-height: 1.6;
+      transition: background-color var(--transition-speed) ease, color var(--transition-speed) ease;
+      min-height: 100vh;
+      padding-bottom: 100px;
+    }
+
+    /* Background Orbs */
+    .bg-orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(140px);
+      z-index: -1;
+      opacity: 0.15;
+      transition: background var(--transition-speed) ease;
+    }
+
+    .orb-left {
+      width: 450px;
+      height: 450px;
+      background: var(--jmkn-violet-primary);
+      top: -100px;
+      left: -100px;
+    }
+
+    .orb-right {
+      width: 500px;
+      height: 500px;
+      background: var(--jmkn-gold-primary);
+      top: 400px;
+      right: -200px;
+    }
+
+    /* --- HEADER --- */
+    header {
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--jmkn-border);
+      transition: border var(--transition-speed) ease;
+    }
+
+    .header-title h1 {
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--jmkn-text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .header-title span {
+      color: var(--jmkn-text-muted);
+      font-size: 14px;
+      font-weight: 400;
+      margin-left: 10px;
+      border-left: 1px solid var(--jmkn-border);
+      padding-left: 10px;
+    }
+
+    .btn-toggle {
+      background: rgba(0, 0, 0, 0.02);
+      border: 1px solid var(--jmkn-border);
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+
+    .btn-toggle:hover {
+      border-color: var(--jmkn-violet-primary);
+      background: var(--jmkn-bg-well);
+      transform: translateY(-1px);
+    }
+
+    /* --- MAIN LAYOUT --- */
+    main {
+      width: 100%;
+      max-width: 1100px;
+      margin: 40px auto 0;
+      padding: 0 20px;
+    }
+
+    .intro-block {
+      margin-bottom: 60px;
+    }
+
+    .intro-block h2 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--jmkn-violet-primary);
+      margin-bottom: 15px;
+    }
+
+    .intro-block p {
+      font-size: 20px;
+      line-height: 1.5;
+      color: var(--jmkn-text-primary);
+      max-width: 800px;
+    }
+
+    /* --- GRID SECTIONS --- */
+    .section-title {
+      font-size: 24px;
+      font-weight: 500;
+      color: var(--jmkn-text-primary);
+      margin: 60px 0 25px;
+      border-bottom: 1px solid var(--jmkn-border);
+      padding-bottom: 10px;
+      transition: all var(--transition-speed) ease;
+    }
+
+    /* --- 1. CORE PRINCIPLES --- */
+    .principles-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+    }
+
+    .p-card {
+      background: var(--jmkn-bg-card);
+      border: 1px solid var(--jmkn-border);
+      border-radius: var(--jmkn-radius-large);
+      padding: 30px 24px;
+      box-shadow: var(--jmkn-shadow);
+      transition: all var(--transition-speed) ease;
+    }
+
+    .p-card h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--jmkn-text-primary);
+      margin-bottom: 12px;
+    }
+
+    .p-card p {
+      font-size: 13.5px;
+      color: var(--jmkn-text-secondary);
+      line-height: 1.5;
+    }
+
+    /* --- 2. COLOR PALETTE SWATCHES --- */
+    .colors-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 25px;
+    }
+
+    .color-swatch {
+      background: var(--jmkn-bg-card);
+      border: 1px solid var(--jmkn-border);
+      border-radius: var(--jmkn-radius-large);
+      padding: 20px;
+      box-shadow: var(--jmkn-shadow);
+      transition: all var(--transition-speed) ease;
+    }
+
+    .swatch-display {
+      width: 100%;
+      height: 100px;
+      border-radius: var(--jmkn-radius-small);
+      margin-bottom: 15px;
+      border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .color-swatch h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--jmkn-text-primary);
+      margin-bottom: 5px;
+    }
+
+    .color-swatch p {
+      font-family: var(--jmkn-font-mono);
+      font-size: 12px;
+      color: var(--jmkn-text-muted);
+      margin-bottom: 8px;
+    }
+
+    .color-swatch span {
+      font-size: 13px;
+      color: var(--jmkn-text-secondary);
+      line-height: 1.4;
+      display: block;
+    }
+
+    /* --- 3. TYPOGRAPHY & TONE --- */
+    .typo-container {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 40px;
+    }
+
+    .typo-spec {
+      background: var(--jmkn-bg-card);
+      border: 1px solid var(--jmkn-border);
+      border-radius: var(--jmkn-radius-large);
+      padding: 40px;
+      box-shadow: var(--jmkn-shadow);
+    }
+
+    .font-sample {
+      margin-bottom: 30px;
+      padding-bottom: 25px;
+      border-bottom: 1px solid var(--jmkn-border);
+    }
+
+    .font-sample:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .sample-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--jmkn-text-muted);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .sample-sample {
+      color: var(--jmkn-text-primary);
+    }
+
+    /* Tone of Voice Panel */
+    .tone-spec {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .tone-card {
+      background: var(--jmkn-bg-well);
+      border: 1px solid var(--jmkn-border);
+      border-radius: var(--jmkn-radius-large);
+      padding: 30px;
+      box-shadow: var(--jmkn-shadow);
+    }
+
+    .tone-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tone-card.bad h3 { color: #DC2626; }
+    .tone-card.good h3 { color: #16A34A; }
+
+    .tone-card p {
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--jmkn-text-secondary);
+    }
+
+    /* --- 4. REACTIVITY PLAYGROUND (DEMOS) --- */
+    .playground-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+    }
+
+    .demo-box {
+      background: var(--jmkn-bg-card);
+      border: 1px solid var(--jmkn-border);
+      border-radius: var(--jmkn-radius-large);
+      padding: 35px;
+      box-shadow: var(--jmkn-shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .demo-box h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--jmkn-text-primary);
+      border-bottom: 1px solid var(--jmkn-border);
+      padding-bottom: 8px;
+    }
+
+    /* Interactive 3D Card */
+    .tilt-card-wrapper {
+      perspective: 1000px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 250px;
+    }
+
+    .tilt-card {
+      width: 280px;
+      height: 180px;
+      background: var(--jmkn-bg-well);
+      border: 1px solid var(--jmkn-border);
+      border-radius: var(--jmkn-radius-large);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+      transition: transform 0.1s ease-out;
+      transform-style: preserve-3d;
+      will-change: transform;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tilt-card-header {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--jmkn-violet-primary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transform: translateZ(20px);
+    }
+
+    .tilt-card-body {
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--jmkn-text-primary);
+      transform: translateZ(35px);
+    }
+
+    .tilt-card-footer {
+      font-size: 12px;
+      color: var(--jmkn-text-muted);
+      transform: translateZ(15px);
+    }
+
+    /* Interactive Node Field Sandbox */
+    .node-sandbox {
+      width: 100%;
+      height: 250px;
+      position: relative;
+      background: var(--jmkn-bg-well);
+      border: 1px solid var(--jmkn-border);
+      border-radius: 15px;
+      overflow: hidden;
+    }
+
+    .node-sandbox-grid {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background-image: radial-gradient(var(--jmkn-border) 1px, transparent 1px);
+      background-size: 20px 20px;
+      opacity: 0.5;
+    }
+
+    .sandbox-svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Button and Logo Demo Containers */
+    .flex-demo {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      justify-content: center;
+      height: 100px;
+      background: var(--jmkn-bg-well);
+      border: 1px solid var(--jmkn-border);
+      border-radius: 12px;
+    }
+
+    .btn-gold {
+      background: var(--jmkn-gold-gradient);
+      border: none;
+      padding: 10px 22px;
+      border-radius: 25px;
+      color: #000000;
+      font-size: 13.5px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: var(--jmkn-font-family);
+      box-shadow: 0 4px 15px rgba(181, 148, 16, 0.15);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-gold:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(181, 148, 16, 0.25);
+    }
+
+    .btn-violet-ghost {
+      background: transparent;
+      border: 1px solid var(--jmkn-violet-primary);
+      padding: 10px 22px;
+      border-radius: 25px;
+      color: var(--jmkn-text-primary);
+      font-size: 13.5px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: var(--jmkn-font-family);
+      transition: all 0.3s ease;
+    }
+
+    .btn-violet-ghost:hover {
+      background: var(--jmkn-violet-glow);
+      transform: translateY(-2px);
+    }
+
+    /* --- 5. CODE UTILITIES --- */
+    .code-box {
+      background: var(--jmkn-bg-well);
+      border: 1px solid var(--jmkn-border);
+      border-radius: var(--jmkn-radius-large);
+      padding: 24px;
+      box-shadow: var(--jmkn-shadow);
+      font-family: var(--jmkn-font-mono);
+      font-size: 13px;
+      color: var(--jmkn-text-primary);
+      white-space: pre-wrap;
+      overflow-x: auto;
+      max-height: 400px;
+    }
+
+    /* Logo Assets Section */
+    .logo-assets-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+
+    .logo-theme-column {
+      border: 1px solid var(--jmkn-border);
+      border-radius: var(--jmkn-radius-large);
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .logo-theme-column.dark-theme-assets {
+      background: #09090C;
+      color: #FFFFFF;
+      border-color: #21222D;
+    }
+
+    .logo-theme-column.light-theme-assets {
+      background: #FFFFFF;
+      color: #1D1D1F;
+      border-color: #E5E5EA;
+    }
+
+    .logo-theme-column h3 {
+      font-size: 18px;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+      padding-bottom: 12px;
+      margin-bottom: 8px;
+    }
+    
+    .logo-theme-column.light-theme-assets h3 {
+      border-bottom-color: #F5F5F7;
+    }
+
+    .logo-asset-row {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 15px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .logo-theme-column.light-theme-assets .logo-asset-row {
+      background: #F5F5F7;
+      border-color: #E5E5EA;
+    }
+
+    .logo-asset-preview {
+      width: 80px;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .logo-theme-column.light-theme-assets .logo-asset-preview {
+      background: rgba(0, 0, 0, 0.03);
+    }
+
+    .logo-asset-preview img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .logo-asset-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .logo-asset-name {
+      font-family: var(--jmkn-font-mono);
+      font-size: 12px;
+      font-weight: 500;
+      word-break: break-all;
+    }
+
+    .logo-asset-desc {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .logo-theme-column.light-theme-assets .logo-asset-desc {
+      color: #86868B;
+    }
+
+    .logo-asset-link {
+      font-size: 12px;
+      text-decoration: none;
+      color: var(--jmkn-gold-primary);
+      font-weight: 500;
+      transition: opacity 0.2s;
+    }
+
+    .logo-asset-link:hover {
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body data-theme="light">
+
+  <!-- Background Orbs -->
+  <div class="bg-orb orb-left"></div>
+  <div class="bg-orb orb-right"></div>
+
+  <!-- Header -->
+  <header>
+    <div class="header-title">
+      <h1>JMKN Tech Design Guidelines <span>Interactive Styleguide</span></h1>
+    </div>
+    <!-- Theme Toggle Switch -->
+    <button class="btn-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark theme">
+      <span id="theme-icon">🌙</span>
+    </button>
+  </header>
+
+  <!-- Main Content -->
+  <main>
+    
+    <!-- Introduction -->
+    <div class="intro-block">
+      <h2>Joint Minds Knowledge Network</h2>
+      <p style="margin-bottom: 12px; font-size: 14px; opacity: 0.85;">Official Domain: <a href="https://jmkn.tech" target="_blank" style="color: var(--jmkn-violet-primary); font-weight: 500; text-decoration: none;">jmkn.tech</a></p>
+      <p>This brand book establishes the rules, variables, and components of the JMKN Tech visual framework. Click the theme button above to watch how all cards, typography, physics canvases, and logos dynamically respond.</p>
+    </div>
+
+    <!-- Core Principles Section -->
+    <div class="section-title">01 / Visual Principles</div>
+    <div class="principles-grid">
+      <div class="p-card">
+        <h3>UX in Our Veins</h3>
+        <p>Designing layouts that prioritize clarity and minimal cognitive load. Clean margins, spacious structures, and high usability.</p>
+      </div>
+      <div class="p-card">
+        <h3>Play to Individuality</h3>
+        <p>Bespoke architecture over templates. Our UI reflects custom engineering tailored uniquely to each corporate workspace.</p>
+      </div>
+      <div class="p-card">
+        <h3>Impact Over Checklist</h3>
+        <p>Data visualization highlights business results (revenue unlocked, hours saved) rather than simple feature ticks.</p>
+      </div>
+      <div class="p-card">
+        <h3>Anodized Precision</h3>
+        <p>Light weights, sharp geometry, and generous white space inspired by high-end consumer hardware (Apple / Ultrahuman).</p>
+      </div>
+    </div>
+
+    <!-- Color Palette Section -->
+    <div class="section-title">02 / Color System (Option A: Sky Cyan & Gold)</div>
+    <div class="colors-grid">
+      <!-- 1 -->
+      <div class="color-swatch">
+        <div class="swatch-display" style="background: var(--jmkn-bg-primary);"></div>
+        <h3>Primary Background</h3>
+        <p>var(--jmkn-bg-primary)</p>
+        <span>Light: Apple Silver (#F5F5F7)<br>Dark: Obsidian Black (#09090C)</span>
+      </div>
+      <!-- 2 -->
+      <div class="color-swatch">
+        <div class="swatch-display" style="background: var(--jmkn-bg-well);"></div>
+        <h3>Secondary base (Wells)</h3>
+        <p>var(--jmkn-bg-well)</p>
+        <span>Light: Pure White (#FFFFFF)<br>Dark: Charcoal Well (#12121A)</span>
+      </div>
+      <!-- 3 -->
+      <div class="color-swatch">
+        <div class="swatch-display" style="background: var(--jmkn-border);"></div>
+        <h3>Borders / Dividers</h3>
+        <p>var(--jmkn-border)</p>
+        <span>Light: Silver Gray (#D2D2D7)<br>Dark: Slate Violet (#21222D)</span>
+      </div>
+      <!-- 4 -->
+      <div class="color-swatch">
+        <div class="swatch-display" style="background: var(--jmkn-gold-primary);"></div>
+        <h3>Hero Accent (Gold)</h3>
+        <p>var(--jmkn-gold-primary)</p>
+        <span>Light: Bright Gold (#FFC107)<br>Dark: Bright Gold (#FFC107)</span>
+      </div>
+      <!-- 5 -->
+      <div class="color-swatch">
+        <div class="swatch-display" style="background: var(--jmkn-violet-primary);"></div>
+        <h3>Subhero Accent (Cyan)</h3>
+        <p>var(--jmkn-violet-primary)</p>
+        <span>Light: Sky Cyan (#0EA5C4)<br>Dark: Sky Cyan (#92E2EC)</span>
+      </div>
+      <!-- 6 -->
+      <div class="color-swatch">
+        <div class="swatch-display" style="background: var(--jmkn-text-primary);"></div>
+        <h3>Primary Copy</h3>
+        <p>var(--jmkn-text-primary)</p>
+        <span>Light: Charcoal Black (#1D1D1F)<br>Dark: Space White (#FFFFFF)</span>
+      </div>
+    </div>
+
+    <!-- Typography Section -->
+    <div class="section-title">03 / Typography & Writing Tone</div>
+    <div class="typo-container">
+      
+      <!-- Typo spec sample -->
+      <div class="typo-spec">
+        <div class="font-sample">
+          <div class="sample-label">Font Family: Inter</div>
+          <div class="sample-sample" style="font-size: 16px;">We use Inter for UI and headings. Clean, geometric, and neutral.</div>
+        </div>
+        <div class="font-sample">
+          <div class="sample-label">Display Heading H1 (Inter, weight 500)</div>
+          <div class="sample-sample" style="font-size: 36px; font-weight: 500; letter-spacing: -0.02em;">Enabling Impact via Lean Engineering.</div>
+        </div>
+        <div class="font-sample">
+          <div class="sample-label">Section Heading H2 (Inter, weight 500)</div>
+          <div class="sample-sample" style="font-size: 24px; font-weight: 500; letter-spacing: -0.015em;">Embedded Delivery.</div>
+        </div>
+        <div class="font-sample">
+          <div class="sample-label">Card Heading H3 (Inter, weight 500)</div>
+          <div class="sample-sample" style="font-size: 18px; font-weight: 500;">Bespoke Company Brains</div>
+        </div>
+      </div>
+
+      <!-- Tone Cards -->
+      <div class="tone-spec">
+        <div class="tone-card bad">
+          <h3>❌ Edgy / Hype Copy</h3>
+          <p>"We deploy bleeding-edge neural-net wrappers and write hyper-optimized Solidity code to crush your legacy latency bottleneck."</p>
+        </div>
+        <div class="tone-card good">
+          <h3>✅ Clean / Professional Copy</h3>
+          <p>"We build custom knowledge infrastructure and integrate robust stablecoin rails to optimize your team's workflow and unlock working capital."</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reactivity Playground Demos -->
+    <div class="section-title">04 / Reactivity Playground (Live Demos)</div>
+    <div class="playground-grid">
+      
+      <!-- Demo 1: 3D Tilt Card -->
+      <div class="demo-box">
+        <h3>3D Card Parallax Tilt</h3>
+        <p style="font-size: 13.5px;">Hover over this card and move your cursor. The card rotates in 3D space with a follow-light radial gloss reflection. (Max tilt: 5 degrees).</p>
+        <div class="tilt-card-wrapper">
+          <div class="tilt-card" id="interactive-tilt-card">
+            <div class="tilt-card-header">Impact Metric</div>
+            <div class="tilt-card-body">-40% Operations Time</div>
+            <div class="tilt-card-footer">Joint Minds Knowledge Network</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Demo 2: Zero-G physics field -->
+      <div class="demo-box">
+        <h3>Zero-Gravity Node Physics</h3>
+        <p style="font-size: 13.5px;">Move your mouse into the sandbox panel. The nodes float weightlessly and drift away from the cursor (repeller field), springing back when you leave.</p>
+        <div class="node-sandbox" id="physics-container">
+          <div class="node-sandbox-grid"></div>
+          <svg class="sandbox-svg" id="physics-svg">
+            <defs>
+              <linearGradient id="grad-node-line" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="var(--jmkn-violet-primary)" />
+                <stop offset="100%" stop-color="var(--jmkn-gold-primary)" />
+              </linearGradient>
+            </defs>
+            <path id="sandbox-path" fill="none" stroke="url(#grad-node-line)" stroke-width="1.5" opacity="0.6" />
+            <circle id="sb-node-0" r="5" fill="var(--jmkn-violet-primary)" />
+            <circle id="sb-node-1" r="8" fill="var(--jmkn-gold-primary)" />
+            <circle id="sb-node-2" r="5" fill="var(--jmkn-violet-primary)" />
+            <circle id="sb-node-3" r="6" fill="var(--jmkn-violet-primary)" />
+            <circle id="sb-node-4" r="7" fill="var(--jmkn-gold-primary)" />
+          </svg>
+        </div>
+      </div>
+
+      <!-- Demo 3: MacBook Pill Buttons -->
+      <div class="demo-box">
+        <h3>Pill Buttons</h3>
+        <p style="font-size: 13.5px;">MacBook-inspired solid gold CTA button and transparent Sky Cyan ghost button.</p>
+        <div class="flex-demo">
+          <button class="btn-gold">Primary CTA</button>
+          <button class="btn-violet-ghost">Ghost Button</button>
+        </div>
+      </div>
+
+      <!-- Demo 4: Adaptive Logo SVG -->
+      <div class="demo-box">
+        <h3>Adaptive Staggered Logo</h3>
+        <p style="font-size: 13.5px;">Responsive SVG logo that swaps keycap fills and borders to match the active theme.</p>
+        <div class="flex-demo">
+          <svg width="60" height="60" viewBox="0 0 500 500">
+            <style>
+              .logo-bz {
+                fill: var(--jmkn-bg-well, #FFFFFF);
+                stroke: var(--jmkn-gold-primary, #FFC107);
+                transition: all 0.4s ease;
+              }
+              .logo-kc {
+                fill: var(--svg-key-bg, #FFFFFF);
+                stroke: var(--svg-key-border, #E5E5EA);
+                transition: all 0.4s ease;
+              }
+              .logo-lg {
+                fill: var(--svg-key-legend, #1D1D1F);
+                transition: all 0.4s ease;
+              }
+            </style>
+            <rect x="70" y="55" width="360" height="330" rx="20" class="logo-bz" stroke-width="4" fill-opacity="0.6" />
+            <g transform="translate(115, 100)">
+              <rect x="50" y="0" width="120" height="120" rx="10" class="logo-kc" stroke-width="2" />
+              <text x="74" y="44" font-family="sans-serif" font-size="28" font-weight="500" class="logo-lg">J</text>
+              <rect x="200" y="0" width="120" height="120" rx="10" class="logo-kc" stroke-width="2" />
+              <text x="224" y="44" font-family="sans-serif" font-size="28" font-weight="500" class="logo-lg">K</text>
+              <rect x="10" y="150" width="120" height="120" rx="10" class="logo-kc" stroke-width="2" />
+              <text x="34" y="194" font-family="sans-serif" font-size="28" font-weight="500" class="logo-lg">N</text>
+              <rect x="160" y="150" width="120" height="120" rx="10" class="logo-kc" stroke="url(#mac-gold)" stroke-width="2" />
+              <text x="184" y="194" font-family="sans-serif" font-size="28" font-weight="500" fill="url(#mac-gold)">M</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Brand Logo Assets -->
+    <div class="section-title">05 / Brand Logo Assets</div>
+    <div class="logo-assets-grid">
+      <!-- Dark Mode Column -->
+      <div class="logo-theme-column dark-theme-assets">
+        <h3>Dark Mode Variants (Original)</h3>
+        <p style="font-size: 13.5px; opacity: 0.8; margin-bottom: 10px;">Tailored for dark layouts, utilizing obsidian black base colors with glowing gold legend highlights.</p>
+        
+        <div class="logo-asset-row">
+          <div class="logo-asset-preview">
+            <img src="logo_staggered_dark.svg" alt="Static SVG Dark">
+          </div>
+          <div class="logo-asset-info">
+            <div class="logo-asset-name">logo_staggered_dark.svg</div>
+            <div class="logo-asset-desc">Static vector mark</div>
+            <a href="logo_staggered_dark.svg" class="logo-asset-link" target="_blank">Open SVG &rarr;</a>
+          </div>
+        </div>
+
+        <div class="logo-asset-row">
+          <div class="logo-asset-preview">
+            <img src="logo_animated_dark.gif" alt="Animated GIF Dark">
+          </div>
+          <div class="logo-asset-info">
+            <div class="logo-asset-name">logo_animated_dark.gif</div>
+            <div class="logo-asset-desc">Transparent GIF animation</div>
+            <a href="logo_animated_dark.gif" class="logo-asset-link" download>Download GIF &rarr;</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Light Mode Column -->
+      <div class="logo-theme-column light-theme-assets">
+        <h3>Light Mode Variants (New)</h3>
+        <p style="font-size: 13.5px; color: var(--jmkn-text-secondary); margin-bottom: 10px;">Tailored for light layouts, featuring Apple-style silver bezel with dark keycaps and gold highlights.</p>
+        
+        <div class="logo-asset-row">
+          <div class="logo-asset-preview">
+            <img src="logo_staggered_light.svg" alt="Static SVG Light">
+          </div>
+          <div class="logo-asset-info">
+            <div class="logo-asset-name">logo_staggered_light.svg</div>
+            <div class="logo-asset-desc">Static vector mark</div>
+            <a href="logo_staggered_light.svg" class="logo-asset-link" target="_blank">Open SVG &rarr;</a>
+          </div>
+        </div>
+
+        <div class="logo-asset-row">
+          <div class="logo-asset-preview">
+            <img src="logo_animated_light.gif" alt="Animated GIF Light">
+          </div>
+          <div class="logo-asset-info">
+            <div class="logo-asset-name">logo_animated_light.gif</div>
+            <div class="logo-asset-desc">Transparent GIF animation</div>
+            <a href="logo_animated_light.gif" class="logo-asset-link" download>Download GIF &rarr;</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CSS Variable Tokens -->
+    <div class="section-title">06 / CSS Tokens (Variables)</div>
+    <pre class="code-box"><code>:root {
+  /* --- LIGHT THEME (Default) --- */
+  --jmkn-bg-primary: #F5F5F7;
+  --jmkn-bg-card: rgba(255, 255, 255, 0.85);
+  --jmkn-bg-well: #FFFFFF;
+  
+  --jmkn-gold-primary: #FFC107;
+  --jmkn-gold-gradient: linear-gradient(135deg, #FFE082 0%, #FFC107 40%, #FF8F00 100%);
+  
+  --jmkn-violet-primary: #0EA5C4;
+  --jmkn-violet-gradient: linear-gradient(135deg, #52C5D9 0%, #0EA5C4 100%);
+  --jmkn-violet-glow: rgba(14, 165, 196, 0.1);
+
+  --jmkn-border: #D2D2D7;
+
+  --jmkn-text-primary: #1D1D1F;
+  --jmkn-text-secondary: #515154;
+  --jmkn-text-muted: #86868B;
+
+  --jmkn-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+  --jmkn-shadow-hover: 0 20px 40px rgba(0, 0, 0, 0.08), 0 0 20px rgba(14, 165, 196, 0.08);
+}
+
+[data-theme="dark"] {
+  /* --- DARK THEME --- */
+  --jmkn-bg-primary: #09090C;
+  --jmkn-bg-card: rgba(18, 18, 26, 0.75);
+  --jmkn-bg-well: #12121A;
+
+  --jmkn-gold-primary: #FFC107;
+  --jmkn-gold-gradient: linear-gradient(135deg, #FFE082 0%, #FFC107 40%, #FF8F00 100%);
+
+  --jmkn-violet-primary: #92E2EC;
+  --jmkn-violet-gradient: linear-gradient(135deg, #BDEDF3 0%, #92E2EC 100%);
+  --jmkn-violet-glow: rgba(146, 226, 236, 0.15);
+  
+  --jmkn-border: #21222D;
+  
+  --jmkn-text-primary: #FFFFFF;
+  --jmkn-text-secondary: #FFF8E7;
+  --jmkn-text-muted: #8E8E93;
+}</code></pre>
+
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <p>&copy; 2026 JMKN Technologies Limited. Brand styleguide.</p>
+  </footer>
+
+  <script>
+    // Theme switching logic
+    function toggleTheme() {
+      const body = document.body;
+      const currentTheme = body.getAttribute('data-theme') || 'light';
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      
+      body.setAttribute('data-theme', newTheme);
+      localStorage.setItem('jmkn-theme', newTheme);
+      document.getElementById('theme-icon').textContent = newTheme === 'light' ? '🌙' : '☀️';
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedTheme = localStorage.getItem('jmkn-theme') || 'light';
+      document.body.setAttribute('data-theme', savedTheme);
+      document.getElementById('theme-icon').textContent = savedTheme === 'light' ? '🌙' : '☀️';
+    });
+
+    // --- ZERO-GRAVITY INTERACTIVE PHYSICS ENGINE ---
+    class ZeroGravityNode {
+      constructor(baseX, baseY) {
+        this.baseX = baseX;
+        this.baseY = baseY;
+        this.x = baseX;
+        this.y = baseY;
+        this.vx = 0;
+        this.vy = 0;
+        this.angle = Math.random() * Math.PI * 2;
+        this.speed = 0.015 + Math.random() * 0.015;
+        this.amplitude = 4 + Math.random() * 4;
+      }
+
+      update(mouseX, mouseY) {
+        // Passive Drift
+        this.angle += this.speed;
+        const driftX = Math.sin(this.angle) * this.amplitude;
+        const driftY = Math.cos(this.angle) * this.amplitude;
+        
+        const targetX = this.baseX + driftX;
+        const targetY = this.baseY + driftY;
+
+        // Mouse repulsion
+        const dx = mouseX - this.x;
+        const dy = mouseY - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const forceRadius = 100;
+
+        if (dist < forceRadius) {
+          const force = (forceRadius - dist) / forceRadius;
+          const pushAngle = Math.atan2(dy, dx);
+          this.vx -= Math.cos(pushAngle) * force * 1.5;
+          this.vy -= Math.sin(pushAngle) * force * 1.5;
+        }
+
+        // Return Spring
+        this.vx += (targetX - this.x) * 0.03;
+        this.vy += (targetY - this.y) * 0.03;
+
+        // Friction
+        this.vx *= 0.86;
+        this.vy *= 0.86;
+        this.x += this.vx;
+        this.y += this.vy;
+      }
+    }
+
+    const sandbox = document.getElementById('physics-container');
+    const nodes = [
+      new ZeroGravityNode(60, 60),
+      new ZeroGravityNode(180, 110),
+      new ZeroGravityNode(100, 200),
+      new ZeroGravityNode(280, 70),
+      new ZeroGravityNode(300, 180)
+    ];
+
+    let mouseX = -9999;
+    let mouseY = -9999;
+
+    sandbox.addEventListener('mousemove', (e) => {
+      const rect = sandbox.getBoundingClientRect();
+      mouseX = e.clientX - rect.left;
+      mouseY = e.clientY - rect.top;
+    });
+
+    sandbox.addEventListener('mouseleave', () => {
+      mouseX = -9999;
+      mouseY = -9999;
+    });
+
+    function animateSandbox() {
+      nodes.forEach(node => node.update(mouseX, mouseY));
+
+      for (let i = 0; i < 5; i++) {
+        const circle = document.getElementById(`sb-node-${i}`);
+        if (circle) {
+          circle.setAttribute('cx', nodes[i].x);
+          circle.setAttribute('cy', nodes[i].y);
+        }
+      }
+
+      const path = document.getElementById('sandbox-path');
+      if (path) {
+        const d = `M ${nodes[0].x},${nodes[0].y} L ${nodes[1].x},${nodes[1].y} L ${nodes[2].x},${nodes[2].y} L ${nodes[0].x},${nodes[0].y} ` +
+                  `M ${nodes[1].x},${nodes[1].y} L ${nodes[3].x},${nodes[3].y} L ${nodes[4].x},${nodes[4].y} L ${nodes[1].x},${nodes[1].y} ` +
+                  `M ${nodes[2].x},${nodes[2].y} L ${nodes[4].x},${nodes[4].y}`;
+        path.setAttribute('d', d);
+      }
+
+      requestAnimationFrame(animateSandbox);
+    }
+    requestAnimationFrame(animateSandbox);
+
+
+    // --- 3D TILT EFFECT ---
+    const tiltCard = document.getElementById('interactive-tilt-card');
+    
+    tiltCard.addEventListener('mousemove', (e) => {
+      const rect = tiltCard.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      const xc = rect.width / 2;
+      const yc = rect.height / 2;
+      const dx = x - xc;
+      const dy = y - yc;
+      
+      const tiltX = (dy / yc) * 5;
+      const tiltY = -(dx / xc) * 5;
+      
+      tiltCard.style.transform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg) scale(1.02)`;
+      tiltCard.style.backgroundImage = `radial-gradient(circle at ${x}px ${y}px, var(--jmkn-violet-glow) 0%, var(--jmkn-bg-card) 90%)`;
+      tiltCard.style.boxShadow = `0 15px 35px rgba(0, 0, 0, 0.08), 0 0 25px var(--jmkn-violet-glow)`;
+    });
+
+    tiltCard.addEventListener('mouseleave', () => {
+      tiltCard.style.transform = 'rotateX(0deg) rotateY(0deg) scale(1)';
+      tiltCard.style.backgroundImage = '';
+      tiltCard.style.boxShadow = '0 10px 30px rgba(0,0,0,0.05)';
+    });
+  </script>
+</body>
+</html>
