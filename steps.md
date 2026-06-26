@@ -291,3 +291,9 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
   Admin: open-alerts banner on the index + a per-tenant Alerts section on the detail page, each row
   dismissable (`POST /alerts/<id>/resolve`, back-redirect guarded to internal paths). Verified
   end-to-end (record → shows → dismiss → gone). gateway rev 00016-v4f, admin rev 00003-8sf.
+- 2026-06-26 — **Agent persona/guardrail update** (`app/agent.py` instruction; model untouched):
+  be concise/precise/to-the-point; always respond in English; **plain text only — no Markdown**;
+  and **confirm with the user before sending more than one email/message** (list recipients +
+  content, wait for go-ahead; a single requested send needs no confirmation). Agent redeployed.
+  Verified live: a 2-recipient email request was held for confirmation (nothing sent); a Spanish
+  prompt got an English, markdown-free reply.
