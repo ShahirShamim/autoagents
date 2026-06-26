@@ -583,6 +583,15 @@ old conversation's takeaways are saved to the agent's long-term memory first, so
 forgotten. This keeps token usage (and cost) from creeping up as history piles up. Change the
 window by setting `SESSION_IDLE_HOURS` on the gateway service.
 
+### Alerts
+The admin webapp surfaces operational problems so you don't have to watch logs. When something
+goes wrong — the agent's long-term memory couldn't be saved when rotating a session, a scheduled
+task errored, a new agent's document store couldn't be created, an agent turn crashed — an alert
+appears: a banner on the tenants page (across everyone) and an Alerts section on the affected
+tenant's page, each tagged **error** or **warning**. Click **dismiss** once you've handled it.
+(Alerts cover the gateway's side of things; an agent failing to send a message on someone's
+behalf shows up in that tenant's message log rather than as an alert.)
+
 ### Security reminders
 - The admin password and the WhatsApp bridge secret were shown in chat during setup —
   **rotate both** (`gcloud secrets versions add admin-password --data-file=-`).

@@ -168,6 +168,41 @@ def tenant_counts(tid: str) -> dict[str, int]:
     }
 
 
+def open_alerts(limit: int = 20) -> list[dict[str, Any]]:
+    """Unresolved operational alerts across all tenants, newest first."""
+    docs = [
+        d.to_dict() | {"id": d.id}
+        for d in db().collection(config.COL_ALERTS).where("resolved", "==", False).stream()
+    ]
+    docs.sort(key=lambda a: a.get("ts", ""), reverse=True)
+    return docs[:limit]
+
+
+def tenant_alerts(tid: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Unresolved alerts for one tenant, newest first."""
+    docs = [
+        d.to_dict() | {"id": d.id}
+        for d in db().collection(config.COL_ALERTS).where("tenant_id", "==", tid).stream()
+        if not d.to_dict().get("resolved")
+    ]
+    docs.sort(key=lambda a: a.get("ts", ""), reverse=True)
+    return docs[:limit]
+
+
+def open_alert_count() -> int:
+    q = db().collection(config.COL_ALERTS).where("resolved", "==", False)
+    try:
+        return int(q.count().get()[0][0].value)
+    except Exception:  # noqa: BLE001
+        return sum(1 for _ in q.stream())
+
+
+def resolve_alert(aid: str) -> None:
+    db().collection(config.COL_ALERTS).document(aid).set(
+        {"resolved": True, "resolved_at": now_iso()}, merge=True
+    )
+
+
 def all_usage() -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """One pass over the usage collection → (per-tenant totals, grand total)."""
     by: dict[str, dict[str, int]] = {}

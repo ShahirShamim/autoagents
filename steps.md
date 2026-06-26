@@ -283,3 +283,11 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
   reuse and caps unbounded session/token growth. `_store_memory` now returns bool to gate
   rotation. Verified: reuse-while-active, and forced 9h-idle → memory flush + new session.
   gateway rev 00015-46k.
+- 2026-06-26 — **Operational alerts in admin.** Gateway `clients.record_alert(kind, detail,
+  tenant_id, severity)` writes to an `alerts` collection `{kind, detail, tenant_id, severity
+  (error|warning), resolved, ts}` (best-effort). Emitted at: `memory_flush_failed` (idle-rotation
+  flush — the one explicitly requested), `memory_store_failed` (post-turn), `corpus_provision_failed`,
+  `agent_error` (email + whatsapp handler failures), `thread_reply_error`, `task_failed` (scheduler).
+  Admin: open-alerts banner on the index + a per-tenant Alerts section on the detail page, each row
+  dismissable (`POST /alerts/<id>/resolve`, back-redirect guarded to internal paths). Verified
+  end-to-end (record → shows → dismiss → gone). gateway rev 00016-v4f, admin rev 00003-8sf.

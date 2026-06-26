@@ -60,6 +60,7 @@ COL_STATE = "agent_state"
 COL_CONTACTS = "contacts"
 COL_USAGE = "usage"  # per-turn token-usage records, keyed by tenant_id
 COL_SESSIONS = "agent_sessions"  # per-tenant active-session pointer {session_id, last_at}
+COL_ALERTS = "alerts"  # operational issues surfaced in the admin panel
 STATE_DOC_ID = "singleton"
 
 # Start a fresh Agent Runtime session once a tenant has been idle this long. On

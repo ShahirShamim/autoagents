@@ -25,6 +25,7 @@ COL_STATE = "agent_state"
 COL_MESSAGES = "messages"
 COL_TASKS = "tasks"
 COL_USAGE = "usage"
+COL_ALERTS = "alerts"
 
 # Cost-estimate rates (USD per 1M tokens). Left at 0 → the UI shows token counts
 # only (no $). Set real gemini-3.5-flash rates to surface an estimated cost.

@@ -438,3 +438,17 @@ Example bug: WhatsApp sends failed because `WHATSAPP_BRIDGE_URL` was never set o
   the rotation flush is the extra guarantee at the boundary.
 - Why: caps unbounded session history (the main prompt-token cost driver — see Analytics) and
   removes reliance on `list_sessions()[0]` ordering.
+
+### OPERATIONAL ALERTS
+- `clients.record_alert(kind, detail, *, tenant_id="", severity="error")` → `alerts/<id> =
+  {kind, detail, tenant_id, severity, resolved:false, ts}`. Best-effort; never breaks the flow.
+- Emitted at the gateway failure points: `memory_flush_failed` (idle-rotation flush in
+  `ensure_session`), `memory_store_failed` (post-turn store in `query_agent`),
+  `corpus_provision_failed` (`ensure_tenant_corpus`), `agent_error` (email + WhatsApp handler
+  excepts), `thread_reply_error`, `task_failed` (`/tasks/run`).
+- Admin (`admin/tenancy.py`): `open_alerts` / `tenant_alerts` / `open_alert_count` /
+  `resolve_alert` filter on `resolved==false` (single-field index; in-process sort). Rendered as a
+  banner on the index + a per-tenant section; `POST /alerts/<id>/resolve` dismisses (the `back`
+  redirect is restricted to internal `/…` paths).
+- Agent-tool-internal failures (e.g. the agent's own send returning an error) are not gateway-
+  visible; add agent-side `record_alert` on a future agent redeploy if you want those too.

@@ -210,6 +210,12 @@ def _thread_reply_email(tenant_id: str, sender: str, subject: str, text: str) ->
         summary = clients.query_agent(tenant_id, session_id, prompt)
     except Exception as exc:  # noqa: BLE001
         log.exception("thread reply agent query failed")
+        clients.record_alert(
+            "thread_reply_error",
+            f"failed reading reply from {sender}: {exc}",
+            tenant_id=tenant_id,
+            severity="error",
+        )
         summary = f"(reply from {sender}, but I hit an error reading it: {exc})\n\n{text}"
 
     owner = tenancy.primary_email(tenant_id)
@@ -350,6 +356,9 @@ async def inbound_email(request: Request) -> Response:
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("agent query failed")
+        clients.record_alert(
+            "agent_error", f"email turn failed: {exc}", tenant_id=tenant_id, severity="error"
+        )
         reply = f"(sorry, I hit an error processing that: {exc})"
 
     clients.send_email(sender, f"Re: {subject}" if subject else "autoagents reply", reply)
@@ -427,6 +436,9 @@ async def inbound_whatsapp(request: Request) -> Response:
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("whatsapp agent query failed")
+        clients.record_alert(
+            "agent_error", f"whatsapp turn failed: {exc}", tenant_id=tenant_id, severity="error"
+        )
         reply = f"(sorry, I hit an error: {exc})"
     clients.send_whatsapp(sender, reply)
     return Response(status_code=200, content="ok")
@@ -469,7 +481,13 @@ async def tasks_run(request: Request) -> dict[str, Any]:
             clients.query_agent(user_id=tid, session_id=session_id, message=instruction)
             clients.mark_task(task["id"], "done")
             ran += 1
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.exception("task %s (tenant %s) failed", task.get("id"), tid)
+            clients.record_alert(
+                "task_failed",
+                f"scheduled task {task.get('id')} failed: {exc}",
+                tenant_id=tid,
+                severity="error",
+            )
             clients.mark_task(task["id"], "error")
     return {"ran": ran, "skipped": skipped}

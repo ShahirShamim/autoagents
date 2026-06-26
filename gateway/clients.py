@@ -141,9 +141,37 @@ def ensure_tenant_corpus(tenant_id: str) -> str:
         corpus = rag.create_corpus(display_name=f"autoagents-{tenant_id}")
         ref.set({"rag_corpus": corpus.name}, merge=True)
         return corpus.name
-    except Exception:  # noqa: BLE001 - degrade gracefully (no doc store yet)
+    except Exception as exc:  # noqa: BLE001 - degrade gracefully (no doc store yet)
         log.exception("ensure_tenant_corpus failed for %s", tenant_id)
+        record_alert(
+            "corpus_provision_failed",
+            f"could not create RAG corpus: {exc}",
+            tenant_id=tenant_id,
+            severity="warning",
+        )
         return ""
+
+
+def record_alert(
+    kind: str, detail: str, *, tenant_id: str = "", severity: str = "error"
+) -> None:
+    """Record an operational issue for the admin panel (best-effort).
+
+    severity: "error" (action likely needed) or "warning" (degraded, self-healing).
+    """
+    try:
+        db().collection(config.COL_ALERTS).document(uuid.uuid4().hex).set(
+            {
+                "kind": kind,
+                "detail": str(detail)[:500],
+                "tenant_id": tenant_id,
+                "severity": severity,
+                "resolved": False,
+                "ts": now_iso(),
+            }
+        )
+    except Exception:  # noqa: BLE001 - alerting must never break the flow
+        log.exception("record_alert failed")
 
 
 def record_usage(tenant_id: str, model: str, usage: dict[str, int]) -> None:
@@ -492,7 +520,13 @@ def query_agent(
     reply = "".join(chunks).strip() or "(no response)"
 
     record_usage(user_id, model_version, usage)
-    _store_memory(engine, user_id, session_id)
+    if not _store_memory(engine, user_id, session_id):
+        record_alert(
+            "memory_store_failed",
+            "post-turn memory store failed",
+            tenant_id=user_id,
+            severity="warning",
+        )
     return reply
 
 
@@ -535,6 +569,12 @@ def ensure_session(user_id: str, state: dict[str, Any] | None = None) -> str:
         # Idle past the window: guarantee memory is captured before rotating.
         if not _store_memory(engine, user_id, sid):
             log.warning("session %s memory flush failed; keeping it (no rotate)", sid)
+            record_alert(
+                "memory_flush_failed",
+                f"idle-rotation flush failed for session {sid}; kept it to avoid memory loss",
+                tenant_id=user_id,
+                severity="error",
+            )
             pref.set({"last_at": nowi}, merge=True)
             return sid
         # flushed → fall through and create a fresh session

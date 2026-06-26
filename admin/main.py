@@ -91,6 +91,33 @@ def fmt_n(n: object) -> str:
     return f"{int(n or 0):,}"
 
 
+def sev_badge(sev: str) -> str:
+    cls = {"error": "b-red", "warning": "b-orange"}.get(sev, "b-grey")
+    return f"<span class='badge {cls}'>{esc(sev)}</span>"
+
+
+def render_alerts(alerts: list, back: str) -> str:
+    """An alerts table with a dismiss button per row. Empty string if none."""
+    if not alerts:
+        return ""
+    rows = ""
+    for a in alerts:
+        rows += (
+            f"<tr><td class=muted>{esc(a.get('ts','')[:19])}</td>"
+            f"<td>{sev_badge(a.get('severity',''))}</td>"
+            f"<td><b>{esc(a.get('kind',''))}</b> "
+            f"<span class=muted>[{esc(a.get('tenant_id','') or '—')}]</span><br>"
+            f"<span class=muted>{esc(a.get('detail',''))}</span></td>"
+            f"<td><form class=inline method=post action='/alerts/{esc(a.get('id',''))}/resolve'>"
+            f"<input type=hidden name=back value='{esc(back)}'>"
+            f"<button type=submit>dismiss</button></form></td></tr>"
+        )
+    return (
+        "<h2>⚠ Alerts</h2><table>"
+        "<tr><th>Time<th>Sev<th>Issue<th></tr>" + rows + "</table>"
+    )
+
+
 def usage_cost(agg: dict[str, int]) -> float | None:
     """Estimated USD cost, or None when no rates are configured (tokens-only)."""
     if not (config.LLM_INPUT_COST_PER_1M or config.LLM_OUTPUT_COST_PER_1M):
@@ -166,8 +193,13 @@ def index(request: Request) -> Response:
             f"<td class=muted>{esc(emails)}</td>"
             f"<td class=muted>{esc(phones)}</td></tr>"
         )
+    alerts = tenancy.open_alerts()
+    alerts_block = (
+        f"<div class=card>{render_alerts(alerts, '/')}</div>" if alerts else ""
+    )
     body = (
         "<div class=bar><h1>Tenants</h1><a href='/logout'>Sign out</a></div>"
+        f"{alerts_block}"
         f"<p class=muted>All tenants: <b>{fmt_n(grand['total'])}</b> tokens over "
         f"<b>{fmt_n(grand['turns'])}</b> agent turns.</p>"
         "<table><tr><th>ID<th>Name<th>Status<th>Agent<th>Tokens<th>Turns<th>Emails<th>Phones</tr>"
@@ -291,6 +323,7 @@ def tenant_detail(request: Request, tid: str) -> Response:
         f"<div class=bar><h1>{esc(tid)} — {esc(t.get('name',''))}</h1><a href='/'>← all tenants</a></div>"
         f"<p>Lifecycle: {lifecycle_badge(t.get('status',''))} &nbsp; Agent: {run_badge(run)}</p>"
         f"<p class=muted>RAG corpus: {esc(t.get('rag_corpus','') or '— none assigned —')}</p>"
+        f"{render_alerts(tenancy.tenant_alerts(tid), '/t/' + tid)}"
         f"{analytics_html}"
         f"<h2>Agent run-state</h2><p>{state_btn('running')}{state_btn('paused')}{state_btn('stopped')}</p>"
         f"<h2>Lifecycle status</h2><p>{life_btn('pending')}{life_btn('active')}{life_btn('disabled')}</p>"
@@ -342,3 +375,13 @@ async def edit_lifecycle(request: Request, tid: str, status: str = Form(...)) ->
     if status in ("pending", "active", "disabled"):
         tenancy.set_tenant_status(tid, status)
     return _redirect(f"/t/{tid}")
+
+
+@app.post("/alerts/{aid}/resolve")
+async def resolve_alert_route(
+    request: Request, aid: str, back: str = Form("/")
+) -> Response:
+    if not _authed(request):
+        return _redirect("/login")
+    tenancy.resolve_alert(aid)
+    return _redirect(back if back.startswith("/") else "/")
