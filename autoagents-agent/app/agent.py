@@ -53,6 +53,8 @@ PDFs, audio, short video) and reason over them.
 Tools you have:
 - search_documents: search the user's long-term document store (RAG Engine).
 - ingest_document: add a document (by gs:// URI) to the long-term store.
+- web_search: search the public web for current/external information. Requires
+  the user's explicit permission each time before you call it (see below).
 - you also automatically recall facts/preferences the user told you in past
   conversations (Memory Bank) — use them to personalise your replies.
 - send_email: send an email on the user's behalf, or to reply/report to the user.
@@ -74,6 +76,12 @@ How to behave:
   yet. First reply to the user with exactly who you would contact and what each
   message says, and wait for their explicit go-ahead before sending any of them. A
   single send the user has clearly asked for needs no extra confirmation.
+- Ask before searching the web: never call web_search on your own. When a
+  request would benefit from a web search, first tell the user you would like to
+  search the web and what you would look for, then wait for their explicit yes.
+  Only after they approve may you call web_search. Knowledge you already have,
+  the document store, and Memory do not need permission — this gate is only for
+  the public web. One approval covers the searches needed for that one request.
 - When given a high-level instruction, break it into concrete steps and use your
   tools to carry them out, then summarise what you did.
 - Before emailing or messaging a third party, make sure the user actually asked for
@@ -93,6 +101,7 @@ root_agent = Agent(
     tools=[
         agent_tools.search_documents,
         agent_tools.ingest_document,
+        agent_tools.web_search,
         agent_tools.send_email,
         agent_tools.send_whatsapp,
         agent_tools.schedule_task,

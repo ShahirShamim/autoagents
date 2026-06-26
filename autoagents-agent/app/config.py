@@ -24,6 +24,8 @@ import os
 LLM = "gemini-3.5-flash"
 LLM_LOCATION = "global"
 REGION = "us-central1"
+# Model used by the web_search tool for Google-Search-grounded answers.
+WEB_SEARCH_MODEL = os.environ.get("WEB_SEARCH_MODEL", LLM)
 
 # --- GCP ---
 # Agent Runtime resolves GOOGLE_CLOUD_PROJECT to the project NUMBER, but the

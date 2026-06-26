@@ -402,6 +402,56 @@ def current_time() -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Web search (Google-Search-grounded Gemini) — gated on user consent
+# --------------------------------------------------------------------------- #
+def web_search(query: str, tool_context: ToolContext = None) -> dict[str, Any]:
+    """Search the public web and return a grounded answer with sources.
+
+    CONSENT REQUIRED: only call this AFTER the user has explicitly agreed to a
+    web search for the current request. If the user has not yet approved
+    searching the web, do NOT call this — first ask them for permission and wait
+    for their explicit yes.
+
+    Args:
+        query: The web search query / question to look up.
+
+    Returns:
+        A dict with "ok", "answer" (a grounded summary), and "sources" (a list
+        of {title, uri}); or "ok": False and "error".
+    """
+    try:
+        from google import genai
+        from google.genai import types as genai_types
+
+        client = genai.Client(
+            vertexai=True, project=config.PROJECT_ID, location=config.LLM_LOCATION
+        )
+        resp = client.models.generate_content(
+            model=config.WEB_SEARCH_MODEL,
+            contents=query,
+            config=genai_types.GenerateContentConfig(
+                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+            ),
+        )
+        answer = getattr(resp, "text", "") or ""
+        sources: list[dict[str, str]] = []
+        cand = (getattr(resp, "candidates", None) or [None])[0]
+        gm = getattr(cand, "grounding_metadata", None)
+        for chunk in getattr(gm, "grounding_chunks", None) or []:
+            web = getattr(chunk, "web", None)
+            if web:
+                sources.append(
+                    {
+                        "title": getattr(web, "title", "") or "",
+                        "uri": getattr(web, "uri", "") or "",
+                    }
+                )
+        return {"ok": True, "answer": answer, "sources": sources}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+# --------------------------------------------------------------------------- #
 # Long-term document store (Vertex AI RAG Engine) — per tenant corpus
 # --------------------------------------------------------------------------- #
 _rag_inited = False

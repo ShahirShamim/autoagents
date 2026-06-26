@@ -51,6 +51,7 @@ for _fn in (
     tools.current_time,
     tools.search_documents,
     tools.ingest_document,
+    tools.web_search,
 ):
     try:
         mcp.tool()(_fn)
