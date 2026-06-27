@@ -482,10 +482,18 @@ HTTP (all X-WA-Secret gated): `POST /sessions/:tenant/start`, `GET /sessions/:te
 
 **Gateway routing (`/inbound/whatsapp`).** Trusts `tenant` from the payload (socket =
 tenant). `_wa_is_owner(tenant, pn, lid, from)` = sender matches the tenant's own
-registered identity → **owner turn** (activate-if-pending → `query_agent` → reply);
-else **third-party** → `_thread_reply_whatsapp` (TTL window → agent summary → relay to
-owner). `clients.send_whatsapp(tenant, to, text)` and `clients.send_email(tenant, …)`
-are **tenant-scoped** (every outbound is `tenant_id`-tagged for per-tenant audit/analytics).
+registered identity → **owner turn** (activate-if-pending → `query_agent` → reply).
+A **non-owner is relayed ONLY if it's a genuine reply** — `latest_outbound_to(tenant,
+"whatsapp", contact)` must be non-empty (the agent actually messaged that contact).
+Otherwise it's dropped + logged `rejected_unsolicited` (random numbers, spam). Genuine
+replies go through `_thread_reply_whatsapp`: `apply_thread_ttl` enforces the **3h reply
+window** from the contact's first reply (`THREAD_TTL_HOURS`, reopened by a fresh
+outbound); within → agent summary relayed to the owner; expired → one "conversation
+closed" note, then silent. **Phone comparison is digit-normalized** (`_match_contact`) so
+a stored `+923…` outbound matches a `923…` inbound reply. The bridge forwards **DMs only**
+(`@s.whatsapp.net`/`@lid`), so status/broadcast/newsletter never reach the gateway.
+`clients.send_whatsapp(tenant, to, text)` and `clients.send_email(tenant, …)` are
+**tenant-scoped** (every outbound is `tenant_id`-tagged for per-tenant audit/analytics).
 The agent's `send_whatsapp` tool also includes its `tenant_id` so sends leave the
 tenant's own number.
 
@@ -506,25 +514,34 @@ gcloud compute instances update-container autoagents-wa --zone us-central1-a \
 gcloud compute instances reset autoagents-wa --zone us-central1-a   # force konlet to re-read + pull
 ```
 Verify: `/health` → `{"sessions":N}`; `/sessions/<tid>` → connected after restore.
-Migrate a pre-existing shared account so a tenant keeps its number: `gsutil -m cp
-gs://…/wa-auth/*.json gs://…/wa-auth/<tid>/` then remove the top-level copies.
 Resize the VM (e2-micro→small→medium) as sessions grow (~50–150 MB each).
+
+**Auth persistence = one gzipped JSON blob per tenant** (`wa-auth/<tenant>.json.gz`,
+`{filename: contents}`), so a restart restores in a single download (~30 s incl. reboot)
+instead of thousands of object reads. Baileys never prunes pre-keys/sessions, so the old
+per-file dir bloated to thousands of files (~6 min restore). Self-migrating: `restoreAuth`
+falls back to the legacy `wa-auth/<tenant>/` dir once, then `runBackup` writes the blob;
+`startAll` discovers a tenant from either layout; `clearAuth` removes both. Purge a legacy
+dir after the blob exists: `gsutil -m rm -r gs://…/wa-auth/<tenant>/`.
 
 **Pitfalls (per-tenant; verified):**
 - Relative `--source`/build path resolves against cwd and **silently fails** — always pass an absolute path.
 - `:latest` is cached by konlet on the COS VM; updating to the same tag does NOT re-pull. Use the **digest** + `reset`.
 - `sock.logout()` can hang and crash Node (took the whole multi-session bridge down once). Cap it with a timeout and add `process.on('unhandledRejection'/'uncaughtException')` guards.
-- Baileys auth dirs **bloat** (pre-keys/sessions never pruned → thousands of files → multi-minute restore on restart). Cheapest cure = unlink + re-link (fresh creds), or prune to `creds.json` + app-state.
+- Baileys auth dirs **bloat** (pre-keys/sessions never pruned → thousands of files). FIXED: persist one gzipped JSON blob per tenant (above) — restore is a single download.
 - Owner-on-own-socket detection needs `pn`; the bridge resolves it (above), but if `pn` is empty an owner message is (harmlessly) treated as a third-party reply back to themselves.
+- **Relay gate must compare phones as digits**, not exact strings: the agent stores outbound `to` with a `+` while inbound replies resolve to bare digits — an exact-match gate drops genuine replies as `rejected_unsolicited` (`_match_contact` normalizes).
 
 ## 12. POST-DEPLOY TESTS
 
 `autoagents-agent/tests/post_deploy.py` — live end-to-end smoke suite against the
 DEPLOYED gateway + Firestore + RAG. Run: `cd autoagents-agent && uv run pytest
 tests/post_deploy.py -v` (needs gcloud auth; reads secrets from Secret Manager).
-Covers: onboarding, WhatsApp→agent, email→agent, WhatsApp + email third-party relay,
-per-tenant long-term storage (RAG ingest+retrieve), and no-context-leak (distinct
-corpora, A's secret invisible to B, Firestore scoping). Simulates inbound with real
+Covers: onboarding, WhatsApp→agent, email→agent, WhatsApp + email third-party relay
+(incl. a `+`-prefixed outbound), **unsolicited inbound dropped**, the **3h reply-window
+expiry** (→ "conversation closed", no relay), per-tenant long-term storage (RAG
+ingest+retrieve), and no-context-leak (distinct corpora, A's secret invisible to B,
+Firestore scoping). Simulates inbound with real
 auth (X-WA-Secret; Svix-signed Resend payloads — HMAC of `id.ts.body`), asserts on the
 Firestore audit trail + RAG, and creates/cleans ephemeral `pdt_` tenants (incl. RAG
 corpus teardown). This suite is what caught the outbound-email-not-tenant-tagged gap.

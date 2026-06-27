@@ -322,3 +322,20 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
   to force a pull); `sock.logout()` can hang and crash the bridge (timeout it + add process
   `unhandledRejection`/`uncaughtException` guards); Baileys auth dirs bloat over time
   (thousands of files → slow restore — re-linking with fresh creds is the cheapest cure).
+- 2026-06-27 — **WhatsApp hardening (post-launch fixes).**
+  - **Unsolicited inbound dropped.** The per-tenant rewrite relayed ANY non-owner inbound to
+    the owner; restored the gate — relay only when `latest_outbound_to(tenant,"whatsapp",
+    contact)` is non-empty (the agent actually messaged them). Unsolicited → dropped +
+    logged `rejected_unsolicited`. Fixed a real leak: random numbers / status posts were
+    reaching the owner.
+  - **3h reply window** confirmed in force for WhatsApp (`apply_thread_ttl`, mirrors email)
+    and locked with `test_whatsapp_third_party_ttl_expired` (expired → one "conversation
+    closed" note, no relay).
+  - **Bridge DM-only filter** — forward `@s.whatsapp.net`/`@lid` only; status/broadcast/
+    newsletter dropped at the source.
+  - **Single-blob creds** — persist each tenant's auth as one `wa-auth/<tenant>.json.gz`
+    (self-migrating from the legacy per-file dir). Cold-restart restore went ~6 min → ~30 s.
+  - **Digit-normalized phone match** — `latest_outbound_to` compared `to` as exact strings,
+    so a stored `+923…` outbound didn't match a `923…` inbound reply → genuine third-party
+    replies were dropped as unsolicited. Now compares digits only (`_match_contact`); the
+    third-party test stores a `+`-prefixed outbound to lock it.

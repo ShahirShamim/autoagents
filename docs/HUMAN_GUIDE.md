@@ -559,6 +559,11 @@ summary to the tenant owner. The third party can keep conversing **only for 3 ho
 their first reply**; after that their messages are blocked (they get one "this conversation
 has closed" note). If the agent emails them again later, a fresh 3-hour window opens.
 
+The same applies on **WhatsApp**: when the agent messages someone for a tenant and they
+reply, it's relayed to the owner under the same 3-hour window. **Unsolicited WhatsApp
+messages are ignored** — anyone the agent never messaged (random numbers, status posts) is
+silently dropped, not forwarded to the owner.
+
 ### What's isolated per tenant
 Long-term memory, RAG documents, scheduled tasks/reminders, run-state, and message logs —
 all scoped by tenant. Verified with a live two-tenant leak test (one tenant cannot see the
