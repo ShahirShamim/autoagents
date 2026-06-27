@@ -15,6 +15,7 @@
 //   AUTH_DIR              local creds dir (default /data/auth); per tenant: <AUTH_DIR>/<tenant>
 import { mkdirSync, promises as fs } from "node:fs";
 import path from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 import { Storage } from "@google-cloud/storage";
 import makeWASocket, {
@@ -48,24 +49,40 @@ process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e?.
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e?.message || e));
 
 const digits = (j) => String(j || "").split("@")[0].split(":")[0].replace(/\D/g, "");
-const tenantPrefix = (t) => `${AUTH_PREFIX}${t}/`;
+const legacyPrefix = (t) => `${AUTH_PREFIX}${t}/`;     // old per-file layout
+const blobPath = (t) => `${AUTH_PREFIX}${t}.json.gz`;  // new single-blob layout
 const tenantDir = (t) => path.join(AUTH_DIR, t);
 
 // ---------- GCS-backed per-tenant auth persistence ----------
+// Auth is stored as ONE gzipped JSON blob per tenant ({filename: contents}) so a
+// restart restores in a single download instead of thousands of object reads
+// (Baileys never prunes pre-keys/sessions → the per-file dir bloats to thousands).
+// Self-migrating: fall back to the legacy per-file layout once, then write the blob.
 async function restoreAuth(tenant) {
   const dir = tenantDir(tenant);
   mkdirSync(dir, { recursive: true });
-  const [files] = await bucket.getFiles({ prefix: tenantPrefix(tenant) });
+  const blob = bucket.file(blobPath(tenant));
+  const [hasBlob] = await blob.exists();
+  if (hasBlob) {
+    const [buf] = await blob.download();
+    const obj = JSON.parse(gunzipSync(buf).toString("utf8"));
+    for (const [name, content] of Object.entries(obj)) {
+      await fs.writeFile(path.join(dir, name), content);
+    }
+    console.log(`[${tenant}] restored ${Object.keys(obj).length} creds (blob)`);
+    return;
+  }
+  const [files] = await bucket.getFiles({ prefix: legacyPrefix(tenant) }); // legacy fallback
   for (const f of files) {
-    const name = f.name.slice(tenantPrefix(tenant).length);
+    const name = f.name.slice(legacyPrefix(tenant).length);
     if (!name) continue;
     await f.download({ destination: path.join(dir, name) });
   }
-  console.log(`[${tenant}] restored ${files.length} auth file(s)`);
+  if (files.length) console.log(`[${tenant}] restored ${files.length} creds (legacy → migrating)`);
 }
 
-// Baileys fires creds.update very frequently; debounce the per-tenant whole-dir
-// backup and upload sequentially (non-resumable) so we don't flood the VM / GCS.
+// Baileys fires creds.update very frequently; debounce, then back the whole auth
+// dir up as ONE blob (cheap vs thousands of uploads on the e2-micro).
 function scheduleBackup(tenant) {
   const s = sessions.get(tenant);
   if (!s || s.backupTimer || s.backingUp) return;
@@ -78,13 +95,15 @@ async function runBackup(tenant) {
   s.backupTimer = null;
   s.backingUp = true;
   try {
-    const names = await fs.readdir(tenantDir(tenant));
-    for (const n of names) {
-      await bucket.upload(path.join(tenantDir(tenant), n), {
-        destination: tenantPrefix(tenant) + n,
-        resumable: false,
-      });
-    }
+    const dir = tenantDir(tenant);
+    const names = await fs.readdir(dir);
+    const obj = {};
+    for (const n of names) obj[n] = await fs.readFile(path.join(dir, n), "utf8");
+    const gz = gzipSync(Buffer.from(JSON.stringify(obj)));
+    await bucket.file(blobPath(tenant)).save(gz, {
+      contentType: "application/gzip",
+      resumable: false,
+    });
   } catch (e) {
     console.error(`[${tenant}] auth backup failed`, e.message);
   }
@@ -93,7 +112,8 @@ async function runBackup(tenant) {
 
 async function clearAuth(tenant) {
   await fs.rm(tenantDir(tenant), { recursive: true, force: true }).catch(() => {});
-  const [files] = await bucket.getFiles({ prefix: tenantPrefix(tenant) });
+  await bucket.file(blobPath(tenant)).delete().catch(() => {});
+  const [files] = await bucket.getFiles({ prefix: legacyPrefix(tenant) });
   await Promise.all(files.map((f) => f.delete().catch(() => {})));
 }
 
@@ -260,10 +280,10 @@ async function startAll() {
   const [files] = await bucket.getFiles({ prefix: AUTH_PREFIX });
   const tenants = new Set();
   for (const f of files) {
-    const rest = f.name.slice(AUTH_PREFIX.length); // "<tenant>/creds.json"
-    if (!rest.includes("/")) continue; // ignore stray top-level files (no tenant dir)
-    const t = rest.split("/")[0];
-    if (t) tenants.add(t);
+    const rest = f.name.slice(AUTH_PREFIX.length);
+    if (rest.endsWith(".json.gz")) tenants.add(rest.slice(0, -".json.gz".length)); // blob
+    else if (rest.includes("/")) tenants.add(rest.split("/")[0]); // legacy per-file dir
+    // stray top-level files (no "/" and not a blob) are ignored
   }
   console.log(`restoring ${tenants.size} tenant session(s): ${[...tenants].join(", ") || "none"}`);
   for (const t of tenants) {
