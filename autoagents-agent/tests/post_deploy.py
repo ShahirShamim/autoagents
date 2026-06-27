@@ -161,6 +161,14 @@ def messages(tid: str, direction: str | None = None, status: str | None = None) 
     return out
 
 
+def log_outbound(tid: str, channel: str, to: str) -> None:
+    """Record a prior outbound so a later inbound counts as a genuine reply."""
+    DB.collection("messages").document(f"pdt_{uuid.uuid4().hex}").set(
+        {"tenant_id": tid, "channel": channel, "direction": "out", "to": to,
+         "from": "agent", "body": "earlier outbound", "status": "sent", "ts": _now()}
+    )
+
+
 def wait_for(fn, timeout: float = 75, interval: float = 4):
     """Poll ``fn`` until it returns truthy; return it, else None on timeout."""
     end = time.time() + timeout
@@ -242,12 +250,29 @@ def test_email_to_agent(active_tenant):
 def test_whatsapp_third_party(active_tenant):
     t = active_tenant
     contact = fresh_phone()  # NOT the owner
+    # The agent must have messaged this contact before for the reply to be genuine.
+    log_outbound(t["tid"], "whatsapp", contact)
     r = wa_inbound(t["tid"], frm=contact, pn=contact, text="sure, sounds good")
     assert r.status_code == 200, r.text
     assert wait_for(lambda: messages(t["tid"], direction="in", status="thread_reply")), \
-        "3rd-party WhatsApp not classified as a thread reply"
+        "genuine 3rd-party WhatsApp reply not classified as a thread reply"
     # the agent summarised + relayed to the owner (outbound)
-    assert wait_for(lambda: messages(t["tid"], direction="out")), "no relay outbound to owner"
+    assert wait_for(lambda: [m for m in messages(t["tid"], direction="out")
+                             if m.get("from") == "bridge"]), "no relay outbound to owner"
+
+
+def test_whatsapp_unsolicited_dropped(active_tenant):
+    """A non-owner the agent NEVER messaged must be dropped, not relayed."""
+    t = active_tenant
+    stranger = fresh_phone()
+    r = wa_inbound(t["tid"], frm=stranger, pn=stranger, text="https://spam.example/x")
+    assert r.status_code == 200, r.text
+    assert wait_for(
+        lambda: messages(t["tid"], direction="in", status="rejected_unsolicited"), timeout=30
+    ), "unsolicited inbound was not dropped"
+    time.sleep(8)  # give any (erroneous) relay time to appear
+    relayed = [m for m in messages(t["tid"], direction="out") if m.get("from") == "bridge"]
+    assert not relayed, "unsolicited inbound was relayed to the owner!"
 
 
 # --------------------------------------------------------------------------- #

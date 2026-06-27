@@ -220,7 +220,9 @@ async function _connect(tenant) {
     for (const m of messages) {
       if (!m.message || m.key.fromMe) continue;
       const jid = m.key.remoteJid || "";
-      if (jid.endsWith("@g.us")) continue; // DMs only
+      // 1:1 DMs only — drop groups (@g.us), status broadcasts (status@broadcast),
+      // newsletters/channels (@newsletter), and anything else non-personal.
+      if (!jid.endsWith("@s.whatsapp.net") && !jid.endsWith("@lid")) continue;
       // Resolve both the LID (…@lid) and the real phone (…@s.whatsapp.net) so the
       // gateway can identify the owner vs a third-party contact on this socket.
       const jidAlt = m.key.remoteJidAlt || "";

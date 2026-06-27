@@ -462,10 +462,23 @@ async def inbound_whatsapp(request: Request) -> Response:
         tenant_id, sender, pn or "-", lid or "-", is_owner,
     )
 
-    # A contact (not the owner) messaged this tenant's number → it's a reply to a
-    # thread the agent started on the owner's behalf. Relay it to the owner.
+    # A non-owner messaged this tenant's number. Relay it ONLY if it's a genuine
+    # reply — i.e. the tenant's agent actually messaged this contact before.
+    # Unsolicited inbound (random numbers, WhatsApp status/broadcasts) is dropped,
+    # never forwarded to the owner.
     if not is_owner:
         contact = pn or lid or tenancy.normalize_phone(sender)
+        if not (contact and clients.latest_outbound_to(tenant_id, "whatsapp", contact)):
+            clients.log_message(
+                channel="whatsapp", direction="in", sender=sender, recipient=tenant_id,
+                body=text, attachments=attachments, status="rejected_unsolicited",
+                tenant_id=tenant_id,
+            )
+            log.info(
+                "dropping unsolicited whatsapp from %s (pn=%s lid=%s) on %s",
+                sender, pn or "-", lid or "-", tenant_id,
+            )
+            return Response(status_code=200, content="unsolicited")
         clients.log_message(
             channel="whatsapp", direction="in", sender=sender, recipient=tenant_id,
             body=text, attachments=attachments, status="thread_reply", tenant_id=tenant_id,
