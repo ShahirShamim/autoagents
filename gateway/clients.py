@@ -194,13 +194,25 @@ def record_usage(tenant_id: str, model: str, usage: dict[str, int]) -> None:
         log.exception("record_usage failed for %s", tenant_id)
 
 
+def _match_contact(channel: str, value: object) -> str:
+    """Normalise a recipient for comparison: digits-only for WhatsApp (so
+    ``+92 336…`` == ``92336…``), lowercased string otherwise."""
+    s = str(value or "")
+    return "".join(c for c in s if c.isdigit()) if channel == "whatsapp" else s.strip().lower()
+
+
 def latest_outbound_to(tenant_id: str, channel: str, contact: str) -> str:
     """ISO ts of the most recent outbound message this tenant sent to ``contact``.
 
     Used to detect that the agent re-sent to a third party (which reopens their
-    reply window). Empty string if the tenant never messaged that contact.
+    reply window) and that an inbound is a genuine reply. Empty string if the
+    tenant never messaged that contact. WhatsApp numbers are compared as bare
+    digits, since outbound ``to`` may carry a ``+`` / spaces while an inbound
+    reply resolves to plain digits.
     """
-    cl = contact.strip().lower()
+    cl = _match_contact(channel, contact)
+    if not cl:
+        return ""
     best = ""
     for d in (
         db().collection(config.COL_MESSAGES).where("tenant_id", "==", tenant_id).stream()
@@ -209,7 +221,7 @@ def latest_outbound_to(tenant_id: str, channel: str, contact: str) -> str:
         if (
             r.get("direction") == "out"
             and r.get("channel") == channel
-            and str(r.get("to", "")).strip().lower() == cl
+            and _match_contact(channel, r.get("to")) == cl
         ):
             ts = r.get("ts", "")
             if ts > best:

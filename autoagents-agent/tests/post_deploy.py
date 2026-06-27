@@ -251,7 +251,9 @@ def test_whatsapp_third_party(active_tenant):
     t = active_tenant
     contact = fresh_phone()  # NOT the owner
     # The agent must have messaged this contact before for the reply to be genuine.
-    log_outbound(t["tid"], "whatsapp", contact)
+    # Store the outbound WITH a leading "+" (as the agent does) while the reply
+    # resolves to bare digits — the relay gate must still correlate them.
+    log_outbound(t["tid"], "whatsapp", "+" + contact)
     r = wa_inbound(t["tid"], frm=contact, pn=contact, text="sure, sounds good")
     assert r.status_code == 200, r.text
     assert wait_for(lambda: messages(t["tid"], direction="in", status="thread_reply")), \
