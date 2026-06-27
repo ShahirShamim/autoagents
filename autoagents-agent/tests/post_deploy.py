@@ -144,7 +144,7 @@ def del_tenant(tid: str, email: str, phone: str) -> None:
     for col, docid in (("identities", f"email:{email}"), ("identities", f"phone:{phone}"),
                        ("tenants", tid), ("agent_sessions", tid), ("agent_state", tid)):
         DB.collection(col).document(docid).delete()
-    for col in ("messages", "tasks", "usage"):
+    for col in ("messages", "tasks", "usage", "threads"):
         for d in DB.collection(col).where("tenant_id", "==", tid).stream():
             d.reference.delete()
 
@@ -273,6 +273,37 @@ def test_whatsapp_unsolicited_dropped(active_tenant):
     time.sleep(8)  # give any (erroneous) relay time to appear
     relayed = [m for m in messages(t["tid"], direction="out") if m.get("from") == "bridge"]
     assert not relayed, "unsolicited inbound was relayed to the owner!"
+
+
+def test_whatsapp_third_party_ttl_expired(active_tenant):
+    """After the 3h window, a genuine contact's reply is BLOCKED → one courtesy
+    'conversation closed' note to the contact, and NOT relayed to the owner."""
+    import datetime as dt
+
+    t = active_tenant
+    contact = fresh_phone()
+    now = dt.datetime.now(dt.UTC)
+    ago = lambda h: (now - dt.timedelta(hours=h)).isoformat()
+    # Agent messaged them 5h ago; they first replied 4h ago; window expired 1h ago.
+    DB.collection("messages").document(f"pdt_{uuid.uuid4().hex}").set(
+        {"tenant_id": t["tid"], "channel": "whatsapp", "direction": "out", "to": contact,
+         "from": "agent", "body": "earlier outbound", "status": "sent", "ts": ago(5)}
+    )
+    DB.collection("threads").document(f"{t['tid']}:whatsapp:{contact}").set(
+        {"tenant_id": t["tid"], "channel": "whatsapp", "contact": contact,
+         "first_reply_at": ago(4), "expires_at": ago(1), "last_at": ago(4),
+         "created_at": ago(5), "closed_notified": False, "status": "active"}
+    )
+    r = wa_inbound(t["tid"], frm=contact, pn=contact, text="still there?")
+    assert r.status_code == 200, r.text
+    # one courtesy note addressed to the CONTACT (logged even if the bridge send fails)
+    assert wait_for(lambda: [m for m in messages(t["tid"], direction="out")
+                             if contact in str(m.get("to", ""))]), "no 'conversation closed' note"
+    # and NOTHING relayed to the owner
+    time.sleep(6)
+    owner = t["phone"]
+    assert not [m for m in messages(t["tid"], direction="out")
+                if owner in str(m.get("to", ""))], "expired-window reply was relayed to owner!"
 
 
 # --------------------------------------------------------------------------- #
