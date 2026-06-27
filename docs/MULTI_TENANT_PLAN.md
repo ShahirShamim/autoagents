@@ -362,3 +362,19 @@ All phases shipped + verified live. Deployables: Agent Runtime brain (tenant-awa
 - **A — Full build:** Phases 0→7 in order.
 - **B — Core first:** 0,1,2,3 (multi-tenant messaging works) → demo → then 4,5,6.
 - **C — Spikes only now:** run Phase 0, report, then decide.
+
+## Shipped beyond the original plan (2026-06)
+
+- **Per-tenant WhatsApp (replaces the shared account + LID routing).** Each tenant links
+  their **own dedicated WhatsApp number** by scanning a QR from a self-service magic link.
+  The bridge is multi-session (one Baileys socket per tenant, creds under
+  `wa-auth/<tenant>/`); the account boundary is the tenant boundary, so inbound routing is
+  unambiguous and third-party replies relay cleanly. Outbound WhatsApp **and** email are now
+  tenant-scoped. Full detail: **AGENT_GUIDE §11**.
+- **Leak guard realized.** The planned cross-tenant isolation test now lives in
+  `autoagents-agent/tests/post_deploy.py` (a live post-deploy smoke suite — onboarding, both
+  channels in/out, third-party relay, per-tenant long-term storage, no-context-leak). See
+  **AGENT_GUIDE §12**.
+- **Durable runtime config + web_search.** Agent config (bridge URL + secrets) moved to
+  Secret Manager `secretEnv` (survives redeploys; deploy via `deploy.sh`); a consent-gated
+  `web_search` tool was added.

@@ -367,13 +367,20 @@ gcloud compute instances create-with-container autoagents-wa --zone=us-central1-
    `WHATSAPP_BRIDGE_URL=http://<static-ip>:8080` and secret
    `WHATSAPP_BRIDGE_SECRET=whatsapp-bridge-secret:latest`.
 
-6. **Pair (one time):** open `http://<static-ip>:8080/qr?token=<secret>` in a browser —
-   it shows a **live, auto-refreshing QR**. On the dedicated number's phone:
-   WhatsApp → Settings → **Linked Devices → Link a Device** → scan the **on-screen** QR
-   (not a screenshot — it rotates every ~20s). After linking, the session is saved to
-   Cloud Storage, so restarts reconnect automatically (no re-scan).
+6. **Each tenant links their OWN number (self-service).** The bridge is multi-session —
+   one WhatsApp account per tenant — so there is no single shared scan. In the admin
+   webapp open a tenant → **Send WhatsApp link** (emails them a private link), or they
+   open it from onboarding. On that link they see a **live QR**; on the dedicated
+   number's phone: WhatsApp → Settings → **Linked Devices → Link a Device** → scan it.
+   The page flips to "✓ Connected" and the number is saved to Cloud Storage
+   (`wa-auth/<tenant>/`), so restarts reconnect with no re-scan. "Change number" =
+   reopen the link → unlink → scan a new one.
 
-7. **Test:** message the dedicated number from another phone → you get a reply.
+7. **Test:** from your personal phone, message the linked number → the agent replies.
+
+> Bridge code updates: rebuild the image from an **absolute** path, point the VM at the
+> new image **digest** (not `:latest` — the VM caches the tag), then `reset` it. See
+> AGENT_GUIDE §11.
 
 ---
 
@@ -536,9 +543,14 @@ From there you can:
 - Review a tenant's recent messages and tasks.
 
 ### Onboarding a new person (the normal flow)
-1. In the admin webapp, **create a tenant** and add their email (and/or phone).
-2. Tell them to **email `assistant@jmkn.tech` from that address** (or WhatsApp the number).
-3. Their first message onboards them — they get a welcome and can start using their agent.
+1. In the admin webapp, **create a tenant** and add their email (and their personal phone
+   number, which is how the agent recognises them as the owner on WhatsApp).
+2. For WhatsApp, click **Send WhatsApp link** on their tenant page → they get an email
+   with a private link → they open it and **scan the QR with a dedicated/secondary
+   number** (the assistant's line — not their personal WhatsApp). For email, tell them to
+   **email `assistant@jmkn.tech`** from their address.
+3. Their first message (or the WhatsApp link) onboards them — they get a welcome and can
+   start using their agent. The admin page then shows their **linked number**.
 
 ### Third-party replies + the 3-hour window
 When an agent emails someone **on a tenant's behalf**, it sends from a tagged address

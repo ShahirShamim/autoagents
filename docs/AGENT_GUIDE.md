@@ -38,8 +38,8 @@ DOCS_BUCKET       = autoagents-500500-autoagents-agent-docs   # leftover from Ve
 WA_VM             = autoagents-wa (e2-micro, us-central1-a)
 WA_IP             = 136.114.229.113   (static, port 8080)
 WA_IMAGE          = us-central1-docker.pkg.dev/autoagents-500500/autoagents/whatsapp-bridge:latest
-WA_NUMBER         = +44 7340 926493   (dedicated, linked via Baileys)
-WA_AUTH_GCS       = gs://autoagents-500500-attachments/wa-auth/
+WA_NUMBER         = per-tenant (each tenant self-links a dedicated number — see §11)
+WA_AUTH_GCS       = gs://autoagents-500500-attachments/wa-auth/<tenant>/   (per-tenant creds)
 AR_REPO           = us-central1-docker.pkg.dev/autoagents-500500/autoagents
 ```
 
@@ -196,6 +196,9 @@ VERIFY inbound: send external email -> Firestore `messages` gets direction=in + 
 VERIFY scheduler: schedule a past-due task; `curl -X POST -H "X-Tasks-Token: $TOKEN" $GATEWAY_URL/tasks/run` -> {"ran":1}; task status=done.
 
 ### 3.10 WhatsApp bridge (Baileys, e2-micro VM) — optional channel
+> **Note:** the *initial VM + firewall + image* setup below is still current, but the
+> bridge is now **multi-session / per-tenant** and pairing is **self-service** — the
+> single-account `/qr?token=` flow and shared `wa-auth/` here are SUPERSEDED by **§11**.
 ```bash
 gcloud services enable compute.googleapis.com
 gcloud artifacts repositories create autoagents --repository-format=docker --location=us-central1
@@ -234,15 +237,9 @@ VERIFY: `curl http://WA_IP:8080/health` → `connected:true`; message the number
 - `query_agent(user_id, session_id, message, files=None)`: if files, send
   `{"role":"user","parts":[{"text":...}, {"file_data":{file_uri,mime_type}}...]}` else plain string.
 - Model-supported mimes: `application/pdf` or prefix `image/ audio/ video/ text/`.
-- `POST /inbound/whatsapp`: require `X-WA-Secret == WHATSAPP_BRIDGE_SECRET`; body
-  `{from, text, media:{uri,type}|null, name}`. Log (channel=whatsapp) → admin (sender in
-  ADMIN_WHATSAPP and text starts "!") → state → media→file_data → `query_agent(user_id="wa:"+from)` →
-  `send_whatsapp` reply. `@lid` jids pass through verbatim.
-- WhatsApp send: `clients.send_whatsapp(to, text)` → `POST http://WA_IP:8080/send` (X-WA-Secret).
-  The agent's `send_whatsapp` tool calls the same bridge directly.
-- Bridge `whatsapp-bridge/index.js` (Node/Baileys): socket + QR via connection.update; auth via
-  `useMultiFileAuthState` restored-from / backed-up-to GCS (DEBOUNCED, sequential, resumable:false);
-  inbound→GATEWAY_INBOUND_URL; media→GCS; HTTP `/qr` (token), `/send` (secret), `/health`. DMs only.
+- `POST /inbound/whatsapp`, WhatsApp send, and the bridge are now **per-tenant /
+  multi-session** — see **§11**. (The body is `{tenant, from, pn, lid, text, media, name}`;
+  `send_whatsapp(tenant, to, text)` / `send_email(tenant, …)` are tenant-scoped.)
 
 ## 5. RESOURCE INVENTORY
 
@@ -254,14 +251,14 @@ VERIFY: `curl http://WA_IP:8080/health` → `connected:true`; message the number
 | Indexes | tasks(status,due_at); messages(channel,ts desc) |
 | GCS | autoagents-500500-attachments; autoagents-500500-autoagents-agent-docs |
 | RAG corpus | ragCorpora/4611686018427387904 (us-west1, Basic) |
-| Secrets | resend-api-key, resend-webhook-secret, tasks-token |
+| Secrets | resend-api-key, resend-webhook-secret, tasks-token, whatsapp-bridge-secret, whatsapp-bridge-url, link-secret, admin-password |
 | Service accts | autoagents-gateway@…; runtime service agent gcp-sa-aiplatform-re |
 | Scheduler | autoagents-tasks-tick (*/5 * * * *) |
 | Resend | domain jmkn.tech (send+recv); webhook email.received |
 | Compute VM | autoagents-wa (e2-micro, us-central1-a), static IP 136.114.229.113, tag wa-bridge |
 | Firewall | allow-wa-bridge (INGRESS tcp:8080, 0.0.0.0/0) |
 | Artifact Registry | repo `autoagents` (us-central1); image whatsapp-bridge:latest |
-| WhatsApp | Baileys, dedicated number +44 7340 926493; auth in gs://…/wa-auth/ |
+| WhatsApp | Baileys MULTI-SESSION (one account per tenant); per-tenant auth in gs://…/wa-auth/<tenant>/; tenants self-link a dedicated number via /link (see §11) |
 
 ## 6. ENV / SECRETS
 
@@ -270,10 +267,17 @@ WHATSAPP_BRIDGE_URL; secrets RESEND_API_KEY, WHATSAPP_BRIDGE_SECRET.
 (GOOGLE_CLOUD_PROJECT/LOCATION set in code: project from ADC, location=global.)
 Gateway (Cloud Run): GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION=us-central1,
 AGENT_ENGINE_RESOURCE, ATTACHMENTS_BUCKET, SENDER_EMAIL, ADMIN_EMAILS(`;`-sep),
-WHATSAPP_BRIDGE_URL, ADMIN_WHATSAPP(`;`-sep, optional);
-secrets RESEND_API_KEY, RESEND_WEBHOOK_SECRET, TASKS_TOKEN, WHATSAPP_BRIDGE_SECRET.
+WHATSAPP_BRIDGE_URL, GATEWAY_PUBLIC_URL (for magic links), ADMIN_WHATSAPP(`;`-sep, optional);
+secrets RESEND_API_KEY, RESEND_WEBHOOK_SECRET, TASKS_TOKEN, WHATSAPP_BRIDGE_SECRET, LINK_SECRET.
+Admin (Cloud Run): GATEWAY_URL (calls `/internal/wa-link`); secrets ADMIN_PASSWORD, TASKS_TOKEN.
 Bridge (VM container env): GCS_BUCKET, WA_AUTH_PREFIX, GATEWAY_INBOUND_URL, WA_SECRET,
 AUTH_DIR, PORT.
+
+> **Agent Runtime config is sticky in `secretEnv`, not plain `env`.** A bare `agents-cli
+> deploy` resets plain env vars to CLI defaults (it preserves `--secrets`), which once
+> silently wiped `WHATSAPP_BRIDGE_URL` → "WhatsApp bridge not configured". Fix: the URL +
+> API secrets all live in Secret Manager (`whatsapp-bridge-url`, etc.) and are passed via
+> `--secrets` from `autoagents-agent/deploy.sh` — **always deploy the agent with `./deploy.sh`**.
 
 ## 7. PITFALLS (verified; do not rediscover)
 
@@ -317,8 +321,10 @@ AUTH_DIR, PORT.
     parallel on every event floods the 1GB e2-micro → socket-hangups + HTTP flaps. DEBOUNCE
     (single timer), upload SEQUENTIALLY with `resumable:false`. Persist to GCS so restarts
     reconnect (creds.json alone re-auths; pre-keys re-sync).
-19. **`@lid` addressing**: newer WhatsApp identifies senders by a LID (`<id>@lid`), not the phone
-    number. Pass the jid through verbatim for replies; don't assume `@s.whatsapp.net`.
+19. **`@lid` addressing**: newer WhatsApp identifies senders by a LID (`<id>@lid`), not the phone.
+    SUPERSEDED by §11 (per-tenant accounts): routing no longer guesses from the LID — the bridge
+    tags inbound with the `tenant`, and forwards both `pn` (phone) + `lid` so owner-vs-contact is a
+    single match against the tenant's own number.
 20. **`create-with-container` deprecation**: emits a warning (container-VM startup agent being
     discontinued). Works today; long-term migrate to a startup-script-run container or MIG.
 
@@ -452,3 +458,73 @@ Example bug: WhatsApp sends failed because `WHATSAPP_BRIDGE_URL` was never set o
   redirect is restricted to internal `/…` paths).
 - Agent-tool-internal failures (e.g. the agent's own send returning an error) are not gateway-
   visible; add agent-side `record_alert` on a future agent redeploy if you want those too.
+
+---
+
+## 11. PER-TENANT WHATSAPP + SELF-SERVICE LINKING (supersedes the shared-account model)
+
+**Model change.** WhatsApp moved from ONE shared Baileys account (with LID-guessing
+to route inbound, §3.10 / §4 / pitfall 19) to **one linked WhatsApp account PER
+TENANT**. The account boundary IS the tenant boundary, so routing is unambiguous and
+the LID/third-party-reply mess is gone. Each tenant links a **dedicated/secondary**
+number (not their personal WhatsApp) by scanning a QR from a self-service page.
+
+**Bridge — multi-session (`whatsapp-bridge/index.js`).** `sessions: Map<tenantId,
+{sock, connected, connecting, lastQr, number}>`. Per-tenant Baileys auth under GCS
+`wa-auth/<tenant>/` (generalised restore/backup/clear). `startAll()` on boot lists
+`wa-auth/` and starts every tenant subdir (skips stray top-level files — `rest`
+without a `/`). `connection.update` stores per-tenant qr/connected/number; inbound
+`messages.upsert` posts `{tenant, from, pn, lid, text, media, name}` (pn/lid resolved
+via `key.remoteJidAlt` then `signalRepository.lidMapping.getPNForLID`). Tenant-scoped
+HTTP (all X-WA-Secret gated): `POST /sessions/:tenant/start`, `GET /sessions/:tenant`,
+`GET /sessions/:tenant/qr`, `POST /sessions/:tenant/logout`, `POST /send {tenant,to,text}`,
+`GET /health` → `{status, sessions}`.
+
+**Gateway routing (`/inbound/whatsapp`).** Trusts `tenant` from the payload (socket =
+tenant). `_wa_is_owner(tenant, pn, lid, from)` = sender matches the tenant's own
+registered identity → **owner turn** (activate-if-pending → `query_agent` → reply);
+else **third-party** → `_thread_reply_whatsapp` (TTL window → agent summary → relay to
+owner). `clients.send_whatsapp(tenant, to, text)` and `clients.send_email(tenant, …)`
+are **tenant-scoped** (every outbound is `tenant_id`-tagged for per-tenant audit/analytics).
+The agent's `send_whatsapp` tool also includes its `tenant_id` so sends leave the
+tenant's own number.
+
+**Self-service linking (gateway, public).** `GET /link?token=<signed>` → QR page
+(itsdangerous `LINK_SECRET`, salt `aa-walink`); proxies `GET /link/{token}/status|qr`
+and `POST /link/{token}/unlink` to the bridge sessions API; `POST /internal/wa-link/
+{tenant}` (X-Tasks-Token) mints + emails the link (admin "Send WhatsApp link" button →
+this). On connect the gateway writes `wa_linked/wa_number/wa_linked_at` to the tenant doc.
+
+**Deploy the bridge (gotchas cost real cycles):**
+```bash
+# build — ABSOLUTE path (relative "whatsapp-bridge/" silently fails: "could not find source")
+gcloud builds submit --tag WA_IMAGE /ABS/PATH/whatsapp-bridge --project PROJECT_ID
+DIGEST=$(gcloud artifacts docker images describe WA_IMAGE --format='value(image_summary.digest)')
+# point VM at the DIGEST (not :latest — konlet caches the tag and won't re-pull)
+gcloud compute instances update-container autoagents-wa --zone us-central1-a \
+  --container-image "${WA_IMAGE%:*}@${DIGEST}"
+gcloud compute instances reset autoagents-wa --zone us-central1-a   # force konlet to re-read + pull
+```
+Verify: `/health` → `{"sessions":N}`; `/sessions/<tid>` → connected after restore.
+Migrate a pre-existing shared account so a tenant keeps its number: `gsutil -m cp
+gs://…/wa-auth/*.json gs://…/wa-auth/<tid>/` then remove the top-level copies.
+Resize the VM (e2-micro→small→medium) as sessions grow (~50–150 MB each).
+
+**Pitfalls (per-tenant; verified):**
+- Relative `--source`/build path resolves against cwd and **silently fails** — always pass an absolute path.
+- `:latest` is cached by konlet on the COS VM; updating to the same tag does NOT re-pull. Use the **digest** + `reset`.
+- `sock.logout()` can hang and crash Node (took the whole multi-session bridge down once). Cap it with a timeout and add `process.on('unhandledRejection'/'uncaughtException')` guards.
+- Baileys auth dirs **bloat** (pre-keys/sessions never pruned → thousands of files → multi-minute restore on restart). Cheapest cure = unlink + re-link (fresh creds), or prune to `creds.json` + app-state.
+- Owner-on-own-socket detection needs `pn`; the bridge resolves it (above), but if `pn` is empty an owner message is (harmlessly) treated as a third-party reply back to themselves.
+
+## 12. POST-DEPLOY TESTS
+
+`autoagents-agent/tests/post_deploy.py` — live end-to-end smoke suite against the
+DEPLOYED gateway + Firestore + RAG. Run: `cd autoagents-agent && uv run pytest
+tests/post_deploy.py -v` (needs gcloud auth; reads secrets from Secret Manager).
+Covers: onboarding, WhatsApp→agent, email→agent, WhatsApp + email third-party relay,
+per-tenant long-term storage (RAG ingest+retrieve), and no-context-leak (distinct
+corpora, A's secret invisible to B, Firestore scoping). Simulates inbound with real
+auth (X-WA-Secret; Svix-signed Resend payloads — HMAC of `id.ts.body`), asserts on the
+Firestore audit trail + RAG, and creates/cleans ephemeral `pdt_` tenants (incl. RAG
+corpus teardown). This suite is what caught the outbound-email-not-tenant-tagged gap.

@@ -297,3 +297,28 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
   content, wait for go-ahead; a single requested send needs no confirmation). Agent redeployed.
   Verified live: a 2-recipient email request was held for confirmation (nothing sent); a Spanish
   prompt got an English, markdown-free reply.
+- 2026-06-26 — **web_search tool**, gated on explicit user consent (the agent asks before it
+  searches the public web; doc store + Memory + its own knowledge stay ungated).
+- 2026-06-26 — **Durable Agent Runtime config:** a bare `agents-cli deploy` resets plain env
+  vars (it keeps `--secrets`), which kept wiping `WHATSAPP_BRIDGE_URL` → "bridge not configured".
+  Moved the URL + API secrets into Secret Manager (`secretEnv` is sticky) and added
+  `autoagents-agent/deploy.sh` — always deploy the agent with it.
+- 2026-06-27 — **Per-tenant WhatsApp (major rework).** Moved from ONE shared Baileys account
+  to one linked account **per tenant** (multi-session bridge keyed by tenant; per-tenant creds
+  `wa-auth/<tenant>/`). The account boundary is the tenant boundary → inbound routing is
+  unambiguous (no LID guessing), third-party replies relay cleanly, and contacts see the
+  tenant's own number. **Self-service linking:** gateway `GET /link?token` (LINK_SECRET-signed)
+  QR page + `/link/{token}/status|qr|unlink` proxy to the bridge + `POST /internal/wa-link/
+  {tenant}` (emails the link); admin **Send WhatsApp link** button; tenant doc gets
+  `wa_linked`/`wa_number`. `send_whatsapp(tenant,…)` and `send_email(tenant,…)` are now
+  tenant-scoped (every outbound is tenant-tagged). Full detail: AGENT_GUIDE §11.
+- 2026-06-27 — **Post-deploy test suite** (`autoagents-agent/tests/post_deploy.py`): live E2E
+  smoke covering onboarding, WhatsApp→agent, email→agent, WhatsApp + email third-party relay,
+  per-tenant long-term storage (RAG), and no-context-leak isolation. Run with
+  `uv run pytest tests/post_deploy.py -v`. It caught the outbound-email-not-tenant-tagged gap
+  (now fixed). Creates + tears down ephemeral `pdt_` tenants (incl. RAG corpus).
+- Lessons this round: relative build / `--source` paths silently fail ("could not find
+  source") — pass absolute; the COS VM caches the `:latest` tag (deploy by **digest** + `reset`
+  to force a pull); `sock.logout()` can hang and crash the bridge (timeout it + add process
+  `unhandledRejection`/`uncaughtException` guards); Baileys auth dirs bloat over time
+  (thousands of files → slow restore — re-linking with fresh creds is the cheapest cure).
