@@ -129,6 +129,18 @@ def make_tenant(*, status: str, email: str, phone: str, name: str = "PDT") -> st
 
 
 def del_tenant(tid: str, email: str, phone: str) -> None:
+    # Best-effort: delete the per-tenant RAG corpus so test runs don't accumulate
+    # orphan corpora. Read it off the tenant doc before we delete the doc.
+    try:
+        corpus = (DB.collection("tenants").document(tid).get().to_dict() or {}).get("rag_corpus")
+        if corpus:
+            import vertexai
+            from vertexai import rag
+
+            vertexai.init(project=PROJECT, location=RAG_LOCATION)
+            rag.delete_corpus(name=corpus)
+    except Exception:
+        pass
     for col, docid in (("identities", f"email:{email}"), ("identities", f"phone:{phone}"),
                        ("tenants", tid), ("agent_sessions", tid), ("agent_state", tid)):
         DB.collection(col).document(docid).delete()
