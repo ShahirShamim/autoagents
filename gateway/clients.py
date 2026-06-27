@@ -232,34 +232,46 @@ def upload_attachment(content: bytes, filename: str, content_type: str) -> str:
 # --------------------------------------------------------------------------- #
 # Resend (outbound email)
 # --------------------------------------------------------------------------- #
-def send_email(to: str, subject: str, body: str) -> dict[str, Any]:
+def send_email(tenant: str, to: str, subject: str, body: str) -> dict[str, Any]:
+    """Send an email via Resend on ``tenant``'s behalf and log it (tenant-tagged)."""
     if not config.RESEND_API_KEY:
         return {"ok": False, "error": "RESEND_API_KEY not configured"}
-    resp = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {config.RESEND_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "from": config.SENDER_EMAIL,
-            "to": [to],
-            "subject": subject,
-            "text": body,
-        },
-        timeout=30,
-    )
-    ok = resp.status_code in (200, 201)
-    data = resp.json() if resp.content else {}
-    log_message(
-        channel="email",
-        direction="out",
-        sender=config.SENDER_EMAIL,
-        recipient=to,
-        subject=subject,
-        body=body,
-        status="sent" if ok else f"error:{resp.status_code}",
-    )
+    ok = False
+    data: dict[str, Any] = {}
+    status = "error"
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {config.RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": config.SENDER_EMAIL,
+                "to": [to],
+                "subject": subject,
+                "text": body,
+            },
+            timeout=30,
+        )
+        ok = resp.status_code in (200, 201)
+        data = resp.json() if resp.content else {}
+        status = "sent" if ok else f"error:{resp.status_code}"
+    except Exception as exc:  # noqa: BLE001
+        data = {"error": str(exc)}
+    try:
+        log_message(
+            channel="email",
+            direction="out",
+            sender=config.SENDER_EMAIL,
+            recipient=to,
+            subject=subject,
+            body=body,
+            status=status,
+            tenant_id=tenant,
+        )
+    except Exception:  # noqa: BLE001 - logging must not mask a real send
+        pass
     return {"ok": ok, "id": data.get("id", ""), "raw": data}
 
 

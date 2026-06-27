@@ -207,6 +207,7 @@ def _thread_reply_email(tenant_id: str, sender: str, subject: str, text: str) ->
     if disp == "blocked":
         if courtesy:
             clients.send_email(
+                tenant_id,
                 sender,
                 f"Re: {subject}" if subject else "autoagents",
                 "This conversation has now closed. Thanks for your message.",
@@ -238,6 +239,7 @@ def _thread_reply_email(tenant_id: str, sender: str, subject: str, text: str) ->
     owner = tenancy.primary_email(tenant_id)
     if owner:
         clients.send_email(
+            tenant_id,
             owner,
             f"Reply from {sender}" + (f" re: {subject}" if subject else ""),
             summary,
@@ -366,7 +368,7 @@ async def inbound_email(request: Request) -> Response:
     if disp == "onboard":
         tenancy.activate_tenant(tenant_id)
         clients.ensure_tenant_corpus(tenant_id)  # give the new agent a doc store
-        clients.send_email(sender, "Welcome to autoagents", WELCOME_EMAIL)
+        clients.send_email(tenant_id, sender, "Welcome to autoagents", WELCOME_EMAIL)
 
     # Owner control command (sender resolved via their own registered identity).
     body_for_cmd = subject if subject.startswith("!") else text
@@ -374,7 +376,7 @@ async def inbound_email(request: Request) -> Response:
         admin_reply = _admin_command(body_for_cmd, tenant_id, who=f"email:{sender}")
         if admin_reply is not None:
             clients.send_email(
-                sender, f"Re: {subject}" if subject else "autoagents", admin_reply
+                tenant_id, sender, f"Re: {subject}" if subject else "autoagents", admin_reply
             )
             return Response(status_code=200, content="admin handled")
 
@@ -385,6 +387,7 @@ async def inbound_email(request: Request) -> Response:
         return Response(status_code=200, content="stopped")
     if status == "paused":
         clients.send_email(
+            tenant_id,
             sender,
             f"Re: {subject}" if subject else "autoagents",
             "I'm paused right now and will get to this once resumed.",
@@ -416,7 +419,7 @@ async def inbound_email(request: Request) -> Response:
         )
         reply = f"(sorry, I hit an error processing that: {exc})"
 
-    clients.send_email(sender, f"Re: {subject}" if subject else "autoagents reply", reply)
+    clients.send_email(tenant_id, sender, f"Re: {subject}" if subject else "autoagents reply", reply)
     return Response(status_code=200, content="ok")
 
 
@@ -652,6 +655,7 @@ async def internal_wa_link(request: Request, tenant_id: str) -> dict[str, Any]:
     emailed = False
     if email:
         res = clients.send_email(
+            tenant_id,
             email,
             "Link your WhatsApp to autoagents",
             "Open this link on your phone to connect your assistant's WhatsApp by "

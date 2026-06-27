@@ -42,6 +42,11 @@ const bucket = storage.bucket(BUCKET);
 // tenantId -> { sock, connected, connecting, lastQr, number, saveCreds, backupTimer, backingUp }
 const sessions = new Map();
 
+// A stray rejection (e.g. saveCreds racing a logout's clearAuth) must never take
+// the whole bridge — and all tenants — down. Log and keep serving.
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e?.message || e));
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e?.message || e));
+
 const digits = (j) => String(j || "").split("@")[0].split(":")[0].replace(/\D/g, "");
 const tenantPrefix = (t) => `${AUTH_PREFIX}${t}/`;
 const tenantDir = (t) => path.join(AUTH_DIR, t);
@@ -312,14 +317,20 @@ app.post("/sessions/:tenant/logout", async (req, res) => {
   const s = sessions.get(t);
   try {
     if (s?.sock) {
+      // logout() can hang on a half-open socket; cap it so the request (and the
+      // process) never blocks, then tear the session down regardless.
+      await Promise.race([
+        s.sock.logout().catch(() => {}),
+        new Promise((r) => setTimeout(r, 5000)),
+      ]);
       try {
-        await s.sock.logout();
+        s.sock.end?.();
       } catch {
-        /* socket may already be down */
+        /* already closed */
       }
     }
-    await clearAuth(t);
     sessions.delete(t);
+    await clearAuth(t);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
