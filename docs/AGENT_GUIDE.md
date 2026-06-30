@@ -251,7 +251,8 @@ VERIFY: `curl http://WA_IP:8080/health` → `connected:true`; message the number
 | Indexes | tasks(status,due_at); messages(channel,ts desc) |
 | GCS | autoagents-500500-attachments; autoagents-500500-autoagents-agent-docs |
 | RAG corpus | ragCorpora/4611686018427387904 (us-west1, Basic) |
-| Secrets | resend-api-key, resend-webhook-secret, tasks-token, whatsapp-bridge-secret, whatsapp-bridge-url, link-secret, admin-password |
+| Secrets | resend-api-key, resend-webhook-secret, tasks-token, whatsapp-bridge-secret, whatsapp-bridge-url, link-secret, admin-password, admin-magic-secret |
+| Domains | autoagents.jmkn.tech → gateway, admin.autoagents.jmkn.tech → admin (Cloud Run domain mappings; Cloudflare CNAME→ghs, DNS-only) |
 | Service accts | autoagents-gateway@…; runtime service agent gcp-sa-aiplatform-re |
 | Scheduler | autoagents-tasks-tick (*/5 * * * *) |
 | Resend | domain jmkn.tech (send+recv); webhook email.received |
@@ -269,7 +270,10 @@ Gateway (Cloud Run): GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION=us-central1,
 AGENT_ENGINE_RESOURCE, ATTACHMENTS_BUCKET, SENDER_EMAIL, ADMIN_EMAILS(`;`-sep),
 WHATSAPP_BRIDGE_URL, GATEWAY_PUBLIC_URL (for magic links), ADMIN_WHATSAPP(`;`-sep, optional);
 secrets RESEND_API_KEY, RESEND_WEBHOOK_SECRET, TASKS_TOKEN, WHATSAPP_BRIDGE_SECRET, LINK_SECRET.
-Admin (Cloud Run): GATEWAY_URL (calls `/internal/wa-link`); secrets ADMIN_PASSWORD, TASKS_TOKEN.
+Admin (Cloud Run, PUBLIC): GATEWAY_URL (calls `/internal/wa-link`), ADMIN_EMAIL (magic-link
+allowlist), ADMIN_PUBLIC_URL, SENDER_EMAIL, COOKIE_SECURE=true; secrets MAGIC_SECRET
+(admin-magic-secret, signs sessions+links), RESEND_API_KEY (sends the link), ADMIN_PASSWORD
+(break-glass only), TASKS_TOKEN.
 Bridge (VM container env): GCS_BUCKET, WA_AUTH_PREFIX, GATEWAY_INBOUND_URL, WA_SECRET,
 AUTH_DIR, PORT.
 
@@ -384,9 +388,12 @@ outbound `messages` log let the gateway correlate replies (`parse_tagged_tenant`
 → block + one courtesy note; a newer outbound reopens). Reply → agent summary → relayed to
 tenant owner (`primary_email`).
 
-**Admin webapp** = separate Cloud Run service `admin/`, private (`--no-allow-unauthenticated`,
-reached via `gcloud run services proxy`), shared-password signed cookie (`COOKIE_SECURE` env-gated
-because the proxy is http://localhost).
+**Admin webapp** = separate Cloud Run service `admin/`, **public** (`allUsers` run.invoker) on
+`admin.autoagents.jmkn.tech`, gated at the app layer by an **email magic link** (allowlisted to
+`ADMIN_EMAIL`; signed by `MAGIC_SECRET`, 15-min token → `/auth` → 8h session cookie) with the
+shared password kept as break-glass (`/login/password`). `COOKIE_SECURE=true` in prod. Per-tenant
+**agent context** (free-text standing instructions) is edited here and written to the tenant doc;
+the gateway prepends it to every turn (`_framed`, see §on context injection).
 
 **Scheduler** `/tasks/run` runs each due task under its own `tenant_id`; skips paused/stopped tenants.
 

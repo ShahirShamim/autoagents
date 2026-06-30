@@ -528,19 +528,29 @@ and message history — nobody can see anyone else's.
    strangers from chatting with your agents.
 
 ### The admin webapp (`autoagents-admin`)
-Private — open an authenticated tunnel, then use a browser:
-```
-gcloud run services proxy autoagents-admin --region us-central1 --project autoagents-500500
-# then open http://localhost:8080 and log in with the admin password
-```
+Open **https://admin.autoagents.jmkn.tech** and **sign in with an email magic link**:
+enter your address (only `shahirshamim15314@gmail.com` is authorised) → a one-time
+sign-in link is emailed to you → click it (valid 15 min) and you're in. A break-glass
+password still works under the "Emergency password sign-in" disclosure if email is ever
+down. (The service is also reachable on its `*.run.app` URL; same auth.)
+
+The UI uses the JMKN look with a light/dark toggle (top-right ◐).
+
 From there you can:
 - See all tenants with their status + each agent's run-state (running/paused/stopped).
 - **Create a tenant** and assign the email(s) and phone(s) that belong to them. It starts
   `pending`; it flips to `active` automatically the first time that person messages in.
 - Add/remove emails and phones for a tenant.
+- **Set per-tenant agent context** — free-text standing instructions (tone, who's who,
+  facts, do/don'ts) prepended to every one of that tenant's agent turns. Takes effect on
+  the next message; no redeploy.
 - **Pause / stop / resume** any single agent (a paused agent logs but takes no action;
   inbound for it is parked).
 - Review a tenant's recent messages and tasks.
+
+> **User-facing links** (e.g. the WhatsApp QR-pairing link the agent emails a tenant) now
+> point at **`autoagents.jmkn.tech`** (the gateway's custom domain), not the `*.run.app`
+> URL.
 
 ### Onboarding a new person (the normal flow)
 1. In the admin webapp, **create a tenant** and add their email (and their personal phone
