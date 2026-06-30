@@ -582,10 +582,23 @@ _LINK_HTML = """<!doctype html><html><head><meta charset=utf-8>
  button{margin-top:1rem;padding:.6rem 1.2rem;border:1px solid #d0d7de;border-radius:24px;
    background:#f6f8fa;cursor:pointer;font-size:.95rem}button:hover{background:#eef1f4}
  .spin{color:#86868b}
+ .warn{background:#fff8e7;border:1px solid #ffe082;border-radius:12px;padding:.85rem 1rem;
+   text-align:left;font-size:.92rem;margin:1rem 0;line-height:1.55}
+ .steps{text-align:left;margin:1.1rem 0;padding-left:1.3rem;font-size:.95rem}
+ .steps li{margin:.4rem 0}
 </style></head><body>
 <h1>Connect __NAME__'s WhatsApp</h1>
-<p class=muted>Use a dedicated/secondary number for the assistant. On that phone, open
-WhatsApp → Linked Devices → Link a device, then scan the code below.</p>
+<div class=warn>📱 <b>Use a SECOND WhatsApp account — not your personal one.</b>
+This number becomes your assistant's line: it will send and reply to messages on your
+behalf, so it must be separate from the WhatsApp you use yourself. A spare SIM, an old
+phone, or the <b>WhatsApp Business</b> app signed in with a different number all work.</div>
+<p class=muted>On the phone or app holding that second account:</p>
+<ol class=steps>
+  <li>Open <b>WhatsApp</b> (or WhatsApp Business).</li>
+  <li>Go to <b>Settings → Linked Devices</b> &nbsp;<span class=muted>(Android: ⋮ Menu → Linked devices)</span>.</li>
+  <li>Tap <b>Link a device</b>.</li>
+  <li>Point the camera at the QR code below.</li>
+</ol>
 <div id=area><p class=spin>Starting…</p></div>
 <script>
 const T="__TOKEN__";
@@ -689,9 +702,12 @@ async def internal_wa_link(request: Request, tenant_id: str) -> dict[str, Any]:
             email,
             "Link your WhatsApp to autoagents",
             "Open this link on your phone to connect your assistant's WhatsApp by "
-            "scanning a QR code:\n\n" + link + "\n\nThe link is private to you and "
-            "expires 24 hours after it was sent. Need a new one? Ask for the link "
-            "again.",
+            "scanning a QR code:\n\n" + link + "\n\nImportant: you'll need a SECOND "
+            "WhatsApp account for this — not your personal number. That second number "
+            "becomes your assistant's line. A spare SIM, an old phone, or the WhatsApp "
+            "Business app all work; the page walks you through scanning the code.\n\n"
+            "The link is private to you and expires 24 hours after it was sent. Need a "
+            "new one? Ask for the link again.",
         )
         emailed = bool(res.get("ok"))
     return {"ok": True, "link": link, "emailed": emailed, "to": email}
