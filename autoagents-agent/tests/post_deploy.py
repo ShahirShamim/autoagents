@@ -12,8 +12,10 @@ Coverage:
   3. email message → agent     — owner email in → agent replies
   4. agent whatsapp 3rd party  — a contact replies on the tenant's socket → relayed to owner
   5. agent email 3rd party     — a 3rd party replies to assistant+<tenant>@ → relayed to owner
-  6. tenant long-term storage  — per-tenant RAG corpus stores + retrieves a document
-  7. no context leak           — tenant A's data/corpus is invisible to tenant B
+  6. agent context injection   — operator-set per-tenant standing instructions
+                                 (admin panel) are prepended to every agent turn
+  7. tenant long-term storage  — per-tenant RAG corpus stores + retrieves a document
+  8. no context leak           — tenant A's data/corpus is invisible to tenant B
 
 Run (from autoagents-agent/, with gcloud auth + the project venv):
     uv run pytest tests/post_deploy.py -v -s
@@ -242,6 +244,34 @@ def test_email_to_agent(active_tenant):
     assert wait_for(
         lambda: [m for m in messages(t["tid"], direction="out") if m.get("channel") == "email" and m.get("body")]
     ), "agent did not produce an email reply"
+
+
+# --------------------------------------------------------------------------- #
+# Agent context injection: operator-set standing instructions reach the agent
+# --------------------------------------------------------------------------- #
+def test_agent_context_injection(active_tenant):
+    """An operator sets per-tenant ``agent_context`` (as the admin panel does).
+    The gateway must prepend it to every turn, so the agent obeys a standing
+    instruction the inbound message itself never mentions. We prove it end to end
+    by planting a unique codeword the agent can only know from the context, and
+    asserting it surfaces in the agent's reply."""
+    t = active_tenant
+    codeword = f"MARMOT{uuid.uuid4().hex[:6].upper()}"
+    DB.collection("tenants").document(t["tid"]).set(
+        {"agent_context":
+            f"You must include the exact codeword {codeword} verbatim somewhere in "
+            "every reply you send, no matter what the user asks."},
+        merge=True,
+    )
+    # The inbound never mentions the codeword — the only way it can appear in the
+    # reply is if agent_context was injected into the prompt.
+    r = email_inbound(t["email"], SENDER, "hello", "what can you help me with?")
+    assert r.status_code == 200, r.text
+    assert wait_for(
+        lambda: [m for m in messages(t["tid"], direction="out")
+                 if m.get("channel") == "email" and codeword in (m.get("body") or "")],
+        timeout=90,
+    ), "agent reply did not honour the injected agent_context codeword"
 
 
 # --------------------------------------------------------------------------- #

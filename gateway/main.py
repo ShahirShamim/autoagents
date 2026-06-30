@@ -174,6 +174,22 @@ def _session_state(tenant_id: str) -> dict[str, str]:
     return {"tenant_id": tenant_id, "rag_corpus": tcfg.get("rag_corpus", "")}
 
 
+def _framed(tenant_id: str, prompt: str) -> str:
+    """Prepend the tenant's operator-authored standing instructions to a prompt.
+
+    Read fresh from the tenant doc each turn (not session state) so edits in the
+    admin panel take effect on the very next message — no session rotation wait.
+    No-op when no context is set.
+    """
+    ctx = tenancy.agent_context(tenant_id)
+    if not ctx:
+        return prompt
+    return (
+        "Standing instructions for this user — always honour these:\n"
+        f"{ctx}\n\n----------\n\n{prompt}"
+    )
+
+
 def _to_addresses(*objs: dict[str, Any]) -> list[str]:
     """All recipient addresses across the inbound payload variants (str/list/dict)."""
     out: list[str] = []
@@ -225,7 +241,7 @@ def _thread_reply_email(tenant_id: str, sender: str, subject: str, text: str) ->
     )
     try:
         session_id = clients.ensure_session(tenant_id, state=_session_state(tenant_id))
-        summary = clients.query_agent(tenant_id, session_id, prompt)
+        summary = clients.query_agent(tenant_id, session_id, _framed(tenant_id, prompt))
     except Exception as exc:  # noqa: BLE001
         log.exception("thread reply agent query failed")
         clients.record_alert(
@@ -268,7 +284,7 @@ def _thread_reply_whatsapp(tenant_id: str, contact: str, text: str) -> None:
     )
     try:
         session_id = clients.ensure_session(tenant_id, state=_session_state(tenant_id))
-        summary = clients.query_agent(tenant_id, session_id, prompt)
+        summary = clients.query_agent(tenant_id, session_id, _framed(tenant_id, prompt))
     except Exception as exc:  # noqa: BLE001
         log.exception("wa thread reply agent query failed")
         clients.record_alert(
@@ -410,7 +426,7 @@ async def inbound_email(request: Request) -> Response:
     try:
         session_id = clients.ensure_session(tenant_id, state=_session_state(tenant_id))
         reply = clients.query_agent(
-            user_id=tenant_id, session_id=session_id, message=prompt, files=files
+            user_id=tenant_id, session_id=session_id, message=_framed(tenant_id, prompt), files=files
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("agent query failed")
@@ -520,7 +536,8 @@ async def inbound_whatsapp(request: Request) -> Response:
     try:
         session_id = clients.ensure_session(tenant_id, state=_session_state(tenant_id))
         reply = clients.query_agent(
-            user_id=tenant_id, session_id=session_id, message=text or "(no text)", files=files
+            user_id=tenant_id, session_id=session_id,
+            message=_framed(tenant_id, text or "(no text)"), files=files
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("whatsapp agent query failed")
@@ -713,7 +730,7 @@ async def tasks_run(request: Request) -> dict[str, Any]:
         )
         try:
             session_id = clients.ensure_session(tid, state=_session_state(tid))
-            clients.query_agent(user_id=tid, session_id=session_id, message=instruction)
+            clients.query_agent(user_id=tid, session_id=session_id, message=_framed(tid, instruction))
             clients.mark_task(task["id"], "done")
             ran += 1
         except Exception as exc:  # noqa: BLE001

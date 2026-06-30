@@ -115,6 +115,12 @@ def add_identity(tenant_id: str, channel: str, value: str) -> str:
     return key
 
 
+def agent_context(tenant_id: str) -> str:
+    """Operator-authored standing instructions for this tenant's agent (free text),
+    edited in the admin panel and prepended to every agent turn. Empty if unset."""
+    return ((tenant_config(tenant_id) or {}).get("agent_context") or "").strip()
+
+
 def primary_email(tenant_id: str) -> str:
     """The tenant owner's primary email (where third-party replies are relayed)."""
     emails = (tenant_config(tenant_id) or {}).get("emails", []) or []

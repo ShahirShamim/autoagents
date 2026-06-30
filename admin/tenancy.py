@@ -76,6 +76,14 @@ def set_tenant_status(tid: str, status: str) -> None:
     )
 
 
+def set_agent_context(tid: str, text: str) -> None:
+    """Store operator-authored standing instructions for this tenant's agent.
+    The gateway prepends this to every agent turn (tenancy.agent_context)."""
+    db().collection(config.COL_TENANTS).document(tid).set(
+        {"agent_context": text, "agent_context_at": now_iso()}, merge=True
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Identities (routing keys + tenant doc lists kept in sync)
 # --------------------------------------------------------------------------- #

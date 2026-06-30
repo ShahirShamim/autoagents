@@ -240,7 +240,7 @@ async def create_tenant(
 
 
 @app.get("/t/{tid}", response_class=HTMLResponse)
-def tenant_detail(request: Request, tid: str, wa: str = "") -> Response:
+def tenant_detail(request: Request, tid: str, wa: str = "", ctx: str = "") -> Response:
     if not _authed(request):
         return _redirect("/login")
     t = tenancy.get_tenant(tid)
@@ -266,6 +266,19 @@ def tenant_detail(request: Request, tid: str, wa: str = "") -> Response:
         "<button type=submit>Send WhatsApp link</button></form>"
         " <span class=muted>— emails the tenant a private QR-pairing link to "
         "link/change their number.</span>"
+    )
+
+    ctx_flash = "<span class='badge b-green'>saved ✓</span>" if ctx == "saved" else ""
+    ctx_html = (
+        "<h2>Agent context</h2>"
+        "<p class=muted>Standing instructions prepended to every agent turn for this "
+        "tenant — tone, who's who, facts, do/don'ts. Takes effect on the next message.</p>"
+        f"<form method=post action='/t/{esc(tid)}/agent-context'>"
+        "<textarea name=context rows=6 "
+        "style='width:100%;box-sizing:border-box;font:inherit;padding:.5rem;"
+        "border:1px solid #d0d7de;border-radius:6px;resize:vertical'>"
+        f"{esc(t.get('agent_context', '') or '')}</textarea>"
+        f"<p><button type=submit>Save context</button> &nbsp; {ctx_flash}</p></form>"
     )
 
     usage = tenancy.tenant_usage(tid)
@@ -346,6 +359,7 @@ def tenant_detail(request: Request, tid: str, wa: str = "") -> Response:
         f"<p class=muted>RAG corpus: {esc(t.get('rag_corpus','') or '— none assigned —')}</p>"
         f"{render_alerts(tenancy.tenant_alerts(tid), '/t/' + tid)}"
         f"{wa_html}"
+        f"{ctx_html}"
         f"{analytics_html}"
         f"<h2>Agent run-state</h2><p>{state_btn('running')}{state_btn('paused')}{state_btn('stopped')}</p>"
         f"<h2>Lifecycle status</h2><p>{life_btn('pending')}{life_btn('active')}{life_btn('disabled')}</p>"
@@ -397,6 +411,17 @@ async def edit_lifecycle(request: Request, tid: str, status: str = Form(...)) ->
     if status in ("pending", "active", "disabled"):
         tenancy.set_tenant_status(tid, status)
     return _redirect(f"/t/{tid}")
+
+
+@app.post("/t/{tid}/agent-context")
+async def edit_agent_context(
+    request: Request, tid: str, context: str = Form("")
+) -> Response:
+    if not _authed(request):
+        return _redirect("/login")
+    if tenancy.get_tenant(tid):
+        tenancy.set_agent_context(tid, context.strip())
+    return _redirect(f"/t/{tid}?ctx=saved")
 
 
 @app.post("/t/{tid}/wa-link")
