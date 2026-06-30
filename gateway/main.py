@@ -564,7 +564,7 @@ def _load_link_token(token: str) -> str | None:
     if not (config.LINK_SECRET and token):
         return None
     try:
-        return _link_serializer().loads(token, max_age=config.LINK_MAX_AGE_DAYS * 86400)
+        return _link_serializer().loads(token, max_age=config.LINK_MAX_AGE_HOURS * 3600)
     except (BadSignature, SignatureExpired):
         return None
 
@@ -689,8 +689,9 @@ async def internal_wa_link(request: Request, tenant_id: str) -> dict[str, Any]:
             email,
             "Link your WhatsApp to autoagents",
             "Open this link on your phone to connect your assistant's WhatsApp by "
-            "scanning a QR code:\n\n" + link + "\n\nThe link is private to you — reopen "
-            "it any time to change the number.",
+            "scanning a QR code:\n\n" + link + "\n\nThe link is private to you and "
+            "expires 24 hours after it was sent. Need a new one? Ask for the link "
+            "again.",
         )
         emailed = bool(res.get("ok"))
     return {"ok": True, "link": link, "emailed": emailed, "to": email}

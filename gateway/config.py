@@ -37,8 +37,8 @@ LINK_SECRET = os.environ.get("LINK_SECRET", "")
 # Public base URL of this gateway, used to build the magic link in emails.
 # Custom domain (Cloud Run domain mapping → Cloudflare); env-overridable.
 GATEWAY_PUBLIC_URL = os.environ.get("GATEWAY_PUBLIC_URL", "https://autoagents.jmkn.tech")
-# Magic link validity (days).
-LINK_MAX_AGE_DAYS = int(os.environ.get("LINK_MAX_AGE_DAYS", "30"))
+# WhatsApp-linking magic link validity (hours) — expires this long after sending.
+LINK_MAX_AGE_HOURS = int(os.environ.get("LINK_MAX_AGE_HOURS", "24"))
 ADMIN_WHATSAPP = [
     n.strip()
     for n in os.environ.get("ADMIN_WHATSAPP", "").replace(";", ",").split(",")
