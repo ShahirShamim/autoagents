@@ -50,31 +50,119 @@ def esc(v: object) -> str:
 
 CSS = """
 <style>
- body{font-family:system-ui,-apple-system,sans-serif;max-width:1000px;margin:1.5rem auto;
-   padding:0 1rem;color:#1f2328;line-height:1.5}
- a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
- h1{font-size:1.4rem}h2{font-size:1.05rem;margin-top:1.6rem;border-bottom:1px solid #eaecef;padding-bottom:.3rem}
- table{border-collapse:collapse;width:100%;font-size:.9rem;margin:.5rem 0}
- th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #eaecef;vertical-align:top}
- th{color:#57606a;font-weight:600}
- input,select{padding:.35rem .5rem;border:1px solid #d0d7de;border-radius:6px;font-size:.9rem}
- button{padding:.35rem .7rem;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;
-   cursor:pointer;font-size:.85rem}button:hover{background:#eef1f4}
+ /* JMKN design tokens — shadcn-flavoured surfaces on the brand palette */
+ :root{
+   --bg:#F5F5F7; --card:rgba(255,255,255,.8); --well:#FFFFFF; --elev:#FFFFFF;
+   --gold:#FFC107; --gold-grad:linear-gradient(135deg,#FFE082 0%,#FFC107 40%,#FF8F00 100%);
+   --cyan:#0EA5C4; --cyan-soft:#92E2EC; --ring:rgba(14,165,196,.35);
+   --border:#D2D2D7; --border-soft:#E5E5EA;
+   --text:#1D1D1F; --text2:#515154; --muted:#86868B;
+   --shadow:0 1px 2px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.04);
+   --shadow-h:0 20px 40px rgba(0,0,0,.08),0 0 20px rgba(146,226,236,.10);
+   --radius:16px; --radius-sm:9px;
+   --green-bg:#E6F8EC;--green-fg:#137333;--orange-bg:#FFF1DD;--orange-fg:#A85A00;
+   --red-bg:#FCE9E8;--red-fg:#C0322C;--grey-bg:#ECECEE;--grey-fg:#6B6B70;
+ }
+ [data-theme=dark]{
+   --bg:#09090C; --card:rgba(18,18,26,.7); --well:#12121A; --elev:#16161F;
+   --cyan:#92E2EC; --cyan-soft:#92E2EC; --ring:rgba(146,226,236,.40);
+   --border:#21222D; --border-soft:#1B1C25;
+   --text:#FFFFFF; --text2:#FFF8E7; --muted:#8E8E93;
+   --shadow:none; --shadow-h:0 20px 40px rgba(0,0,0,.45),0 0 25px rgba(146,226,236,.18);
+   --green-bg:rgba(46,160,67,.16);--green-fg:#56D364;--orange-bg:rgba(255,170,40,.14);--orange-fg:#F0B429;
+   --red-bg:rgba(201,51,46,.18);--red-fg:#FF7B72;--grey-bg:rgba(255,255,255,.07);--grey-fg:#9A9AA0;
+ }
+ *{box-sizing:border-box}
+ html{background:var(--bg)}
+ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;margin:0;
+   background:var(--bg);color:var(--text);line-height:1.6;font-weight:400;
+   -webkit-font-smoothing:antialiased;font-size:15px;
+   transition:background .3s ease,color .3s ease}
+ .wrap{max-width:1040px;margin:0 auto;padding:2rem 1.25rem 4rem}
+ a{color:var(--cyan);text-decoration:none;transition:opacity .15s}
+ a:hover{opacity:.7}
+ h1{font-size:1.7rem;font-weight:500;letter-spacing:-.02em;margin:.2rem 0 .6rem}
+ h2{font-size:1.05rem;font-weight:500;letter-spacing:-.01em;margin:2rem 0 .6rem;
+   padding-bottom:.45rem;border-bottom:1px solid var(--border-soft);color:var(--text)}
+ p{margin:.5rem 0}
+ code{font-family:'SF Mono','Fira Code',monospace;font-size:.85em;
+   background:var(--grey-bg);padding:.1rem .4rem;border-radius:6px}
+ /* tables */
+ table{border-collapse:separate;border-spacing:0;width:100%;font-size:.875rem;margin:.6rem 0;
+   background:var(--well);border:1px solid var(--border-soft);border-radius:var(--radius-sm);
+   overflow:hidden}
+ th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--border-soft);vertical-align:top}
+ tr:last-child td{border-bottom:0}
+ th{color:var(--muted);font-weight:600;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;
+   background:var(--bg)}
+ tbody tr{transition:background .12s}
+ tbody tr:hover{background:var(--bg)}
+ /* form controls */
+ input,select,textarea{padding:.5rem .65rem;border:1px solid var(--border);border-radius:var(--radius-sm);
+   font-size:.9rem;font-family:inherit;background:var(--elev);color:var(--text);
+   transition:border-color .15s,box-shadow .15s}
+ input::placeholder,textarea::placeholder{color:var(--muted)}
+ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 0 3px var(--ring)}
+ button{padding:.45rem .85rem;border:1px solid var(--border);border-radius:var(--radius-sm);
+   background:var(--elev);color:var(--text);cursor:pointer;font-size:.85rem;font-weight:500;
+   font-family:inherit;transition:background .15s,border-color .15s,transform .05s,box-shadow .15s}
+ button:hover{background:var(--bg);border-color:var(--muted)}
+ button:active{transform:translateY(.5px)}
+ button:disabled{opacity:.55;cursor:default;background:var(--cyan-soft);border-color:transparent;
+   color:#0b3b44}
+ button.primary{background:var(--gold-grad);border:none;color:#3a2c00;font-weight:600;
+   box-shadow:0 2px 8px rgba(255,143,0,.25)}
+ button.primary:hover{filter:brightness(1.03);box-shadow:0 4px 14px rgba(255,143,0,.32)}
  form.inline{display:inline}
- .badge{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.75rem;font-weight:600}
- .b-green{background:#dafbe1;color:#1a7f37}.b-orange{background:#fff1e5;color:#bc4c00}
- .b-red{background:#ffebe9;color:#cf222e}.b-grey{background:#eaecef;color:#57606a}
- .bar{display:flex;justify-content:space-between;align-items:center}
- .muted{color:#57606a;font-size:.85rem}.card{border:1px solid #eaecef;border-radius:8px;padding:1rem;margin:.6rem 0}
+ /* badges */
+ .badge{display:inline-block;padding:.18rem .6rem;border-radius:999px;font-size:.72rem;
+   font-weight:600;letter-spacing:.02em;line-height:1.4;border:1px solid transparent}
+ .b-green{background:var(--green-bg);color:var(--green-fg)}
+ .b-orange{background:var(--orange-bg);color:var(--orange-fg)}
+ .b-red{background:var(--red-bg);color:var(--red-fg)}
+ .b-grey{background:var(--grey-bg);color:var(--grey-fg)}
+ /* layout helpers */
+ .bar{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
+ .muted{color:var(--muted);font-size:.85rem}
+ .card{background:var(--card);border:1px solid var(--border-soft);border-radius:var(--radius);
+   padding:1.25rem;margin:.8rem 0;box-shadow:var(--shadow);
+   backdrop-filter:saturate(1.1) blur(8px);-webkit-backdrop-filter:saturate(1.1) blur(8px)}
+ /* theme toggle */
+ .theme-toggle{position:fixed;top:1rem;right:1rem;z-index:50;width:38px;height:38px;padding:0;
+   border-radius:999px;font-size:1.05rem;line-height:1;display:grid;place-items:center;
+   background:var(--card);border:1px solid var(--border);box-shadow:var(--shadow);
+   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+ @media(max-width:600px){.wrap{padding:1.25rem .9rem 3rem}h1{font-size:1.4rem}
+   table{font-size:.8rem}th,td{padding:.45rem .55rem}}
 </style>
 """
+
+# Set the saved theme before first paint (no flash); toggle persists in localStorage.
+_THEME_HEAD = (
+    "<script>(function(){try{var t=localStorage.getItem('jmkn-theme')||'light';"
+    "document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"
+)
+_THEME_BTN = (
+    "<button class=theme-toggle aria-label='Toggle light/dark' "
+    "onclick=\"(function(){var d=document.documentElement,"
+    "n=d.getAttribute('data-theme')==='dark'?'light':'dark';"
+    "d.setAttribute('data-theme',n);try{localStorage.setItem('jmkn-theme',n)}catch(e){}})()\">"
+    "&#9681;</button>"
+)
+_FONT = (
+    "<link rel=preconnect href='https://fonts.googleapis.com'>"
+    "<link rel=preconnect href='https://fonts.gstatic.com' crossorigin>"
+    "<link rel=stylesheet href='https://fonts.googleapis.com/css2?"
+    "family=Inter:wght@300;400;500;600&display=swap'>"
+)
 
 
 def page(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(
-        f"<!doctype html><html><head><meta charset=utf-8>"
+        f"<!doctype html><html lang=en data-theme=light><head><meta charset=utf-8>"
         f"<meta name=viewport content='width=device-width,initial-scale=1'>"
-        f"<title>{esc(title)}</title>{CSS}</head><body>{body}</body></html>"
+        f"<title>{esc(title)}</title>{_FONT}{_THEME_HEAD}{CSS}</head><body>"
+        f"{_THEME_BTN}<main class=wrap>{body}</main></body></html>"
     )
 
 
@@ -146,7 +234,7 @@ def login_form(request: Request, err: str = "") -> HTMLResponse:
         f"<h1>autoagents admin</h1>{msg}"
         "<form method=post action='/login'>"
         "<input type=password name=password placeholder='Admin password' autofocus> "
-        "<button type=submit>Sign in</button></form>",
+        "<button class=primary type=submit>Sign in</button></form>",
     )
 
 
@@ -211,7 +299,7 @@ def index(request: Request) -> Response:
         "<input name=name placeholder='Name'></p>"
         "<p><input name=emails placeholder='emails, comma-separated' size=40></p>"
         "<p><input name=phones placeholder='phones, comma-separated' size=40></p>"
-        "<button type=submit>Create (pending)</button>"
+        "<button class=primary type=submit>Create (pending)</button>"
         "<p class=muted>The tenant onboards when it first messages from an assigned "
         "email/phone; it then flips to active automatically.</p>"
         "</form>"
@@ -263,7 +351,7 @@ def tenant_detail(request: Request, tid: str, wa: str = "", ctx: str = "") -> Re
         "<h2>WhatsApp</h2>"
         f"<p>Status: {wa_status} &nbsp; {wa_flash}</p>"
         f"<form class=inline method=post action='/t/{esc(tid)}/wa-link'>"
-        "<button type=submit>Send WhatsApp link</button></form>"
+        "<button class=primary type=submit>Send WhatsApp link</button></form>"
         " <span class=muted>— emails the tenant a private QR-pairing link to "
         "link/change their number.</span>"
     )
@@ -278,7 +366,7 @@ def tenant_detail(request: Request, tid: str, wa: str = "", ctx: str = "") -> Re
         "style='width:100%;box-sizing:border-box;font:inherit;padding:.5rem;"
         "border:1px solid #d0d7de;border-radius:6px;resize:vertical'>"
         f"{esc(t.get('agent_context', '') or '')}</textarea>"
-        f"<p><button type=submit>Save context</button> &nbsp; {ctx_flash}</p></form>"
+        f"<p><button class=primary type=submit>Save context</button> &nbsp; {ctx_flash}</p></form>"
     )
 
     usage = tenancy.tenant_usage(tid)
