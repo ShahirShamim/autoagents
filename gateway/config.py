@@ -35,9 +35,8 @@ WHATSAPP_BRIDGE_SECRET = os.environ.get("WHATSAPP_BRIDGE_SECRET", "")
 # Signs the per-tenant self-service WhatsApp-linking magic links (/link?token=).
 LINK_SECRET = os.environ.get("LINK_SECRET", "")
 # Public base URL of this gateway, used to build the magic link in emails.
-GATEWAY_PUBLIC_URL = os.environ.get(
-    "GATEWAY_PUBLIC_URL", "https://autoagents-gateway-323512451403.us-central1.run.app"
-)
+# Custom domain (Cloud Run domain mapping → Cloudflare); env-overridable.
+GATEWAY_PUBLIC_URL = os.environ.get("GATEWAY_PUBLIC_URL", "https://autoagents.jmkn.tech")
 # Magic link validity (days).
 LINK_MAX_AGE_DAYS = int(os.environ.get("LINK_MAX_AGE_DAYS", "30"))
 ADMIN_WHATSAPP = [

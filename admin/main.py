@@ -1,6 +1,7 @@
 """autoagents admin webapp — Cloud Run service `autoagents-admin`.
 
-Server-rendered (no client JS framework), gated by a single shared password.
+Server-rendered (no client JS framework); sign-in is an email magic link
+restricted to ADMIN_EMAIL, with the shared password kept as break-glass.
 Lets an operator create/edit tenants, assign email + phone identities, flip
 per-tenant run-state (running/paused/stopped) and lifecycle status, and review
 recent messages + tasks. Reads/writes the same Firestore the gateway/agent use.
@@ -8,6 +9,7 @@ recent messages + tasks. Reads/writes the same Firestore the gateway/agent use.
 from __future__ import annotations
 
 import html
+import logging
 
 import requests
 from fastapi import FastAPI, Form, Request
@@ -17,23 +19,82 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from admin import config, tenancy
 
 app = FastAPI(title="autoagents-admin")
+log = logging.getLogger("admin")
 
 
 # --------------------------------------------------------------------------- #
-# Auth (signed cookie keyed on the shared password)
+# Auth — email magic link (primary) + break-glass password.
+#
+# Session cookies and magic-link tokens are signed with MAGIC_SECRET, decoupled
+# from the break-glass password so the latter can be rotated without bumping
+# everyone's session. Only ADMIN_EMAIL may request (and redeem) a magic link.
 # --------------------------------------------------------------------------- #
+def _signer(salt: str) -> URLSafeTimedSerializer:
+    key = config.MAGIC_SECRET or config.ADMIN_PASSWORD or "unset"
+    return URLSafeTimedSerializer(key, salt=salt)
+
+
 def _serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(config.ADMIN_PASSWORD or "unset", salt="aa-admin")
+    """Signer for the logged-in session cookie."""
+    return _signer("aa-admin")
 
 
 def _authed(request: Request) -> bool:
     tok = request.cookies.get(config.COOKIE_NAME)
-    if not tok or not config.ADMIN_PASSWORD:
+    if not tok:
         return False
     try:
         _serializer().loads(tok, max_age=config.SESSION_MAX_AGE)
         return True
     except (BadSignature, SignatureExpired):
+        return False
+
+
+def _set_session(resp: Response) -> Response:
+    resp.set_cookie(
+        config.COOKIE_NAME,
+        _serializer().dumps("ok"),
+        max_age=config.SESSION_MAX_AGE,
+        httponly=True,
+        secure=config.COOKIE_SECURE,
+        samesite="lax",
+    )
+    return resp
+
+
+def _magic_link(email: str) -> str:
+    token = _signer("aa-magic").dumps(email)
+    return config.ADMIN_PUBLIC_URL.rstrip("/") + f"/auth?token={token}"
+
+
+def _send_magic_email(email: str, link: str) -> bool:
+    """Email a sign-in link via Resend. Returns True on a 2xx send."""
+    if not config.RESEND_API_KEY:
+        log.error("no RESEND_API_KEY configured; cannot send magic link")
+        return False
+    try:
+        r = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {config.RESEND_API_KEY}"},
+            json={
+                "from": f"autoagents admin <{config.SENDER_EMAIL}>",
+                "to": [email],
+                "subject": "Your autoagents admin sign-in link",
+                "text": (
+                    "Click to sign in to the autoagents admin panel:\n\n"
+                    f"{link}\n\n"
+                    "This link expires in 15 minutes. If you didn't request it, "
+                    "ignore this email."
+                ),
+            },
+            timeout=20,
+        )
+        if r.status_code >= 300:
+            log.error("Resend magic-link send failed: %s %s", r.status_code, r.text[:200])
+            return False
+        return True
+    except Exception:  # noqa: BLE001
+        log.exception("Resend magic-link send error")
         return False
 
 
@@ -225,32 +286,67 @@ def health() -> dict[str, str]:
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_form(request: Request, err: str = "") -> HTMLResponse:
+def login_form(request: Request, err: str = "", sent: str = "", bad: str = "") -> HTMLResponse:
     if _authed(request):
         return _redirect("/")
-    msg = "<p class='b-red badge'>Wrong password</p>" if err else ""
+    flash = ""
+    if sent:
+        flash = ("<p class='badge b-green'>If that address is authorised, a sign-in "
+                 "link is on its way. Check your inbox.</p>")
+    elif bad:
+        flash = "<p class='badge b-red'>That sign-in link is invalid or has expired.</p>"
+    elif err:
+        flash = "<p class='badge b-red'>Wrong password.</p>"
+    # Break-glass password form only shows if a password is actually configured.
+    breakglass = (
+        "<details style='margin-top:1.5rem'><summary class=muted "
+        "style='cursor:pointer'>Emergency password sign-in</summary>"
+        "<form method=post action='/login/password' style='margin-top:.6rem'>"
+        "<input type=password name=password placeholder='Break-glass password'> "
+        "<button type=submit>Sign in</button></form></details>"
+        if config.ADMIN_PASSWORD
+        else ""
+    )
     return page(
-        "Login",
-        f"<h1>autoagents admin</h1>{msg}"
+        "Sign in",
+        "<h1>autoagents admin</h1>"
+        f"{flash}"
+        "<div class=card style='max-width:420px'>"
+        "<p>Sign in with an email magic link.</p>"
         "<form method=post action='/login'>"
-        "<input type=password name=password placeholder='Admin password' autofocus> "
-        "<button class=primary type=submit>Sign in</button></form>",
+        "<input type=email name=email placeholder='you@example.com' autofocus required "
+        "style='min-width:240px'> "
+        "<button class=primary type=submit>Email me a link</button></form>"
+        f"{breakglass}"
+        "</div>",
     )
 
 
 @app.post("/login")
-async def login(request: Request, password: str = Form("")) -> Response:
+async def login_magic(request: Request, email: str = Form("")) -> Response:
+    """Email a one-time sign-in link, but only to the single authorised address.
+    Always responds the same way so the allowlist isn't probeable."""
+    if tenancy.normalize_email(email) == config.ADMIN_EMAIL:
+        _send_magic_email(config.ADMIN_EMAIL, _magic_link(config.ADMIN_EMAIL))
+    return _redirect("/login?sent=1")
+
+
+@app.get("/auth")
+def auth(token: str = "") -> Response:
+    """Redeem a magic link: valid + authorised email → start a session."""
+    try:
+        email = _signer("aa-magic").loads(token, max_age=config.MAGIC_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return _redirect("/login?bad=1")
+    if tenancy.normalize_email(email) != config.ADMIN_EMAIL:
+        return _redirect("/login?bad=1")
+    return _set_session(_redirect("/"))
+
+
+@app.post("/login/password")
+async def login_password(request: Request, password: str = Form("")) -> Response:
     if config.ADMIN_PASSWORD and password == config.ADMIN_PASSWORD:
-        resp = _redirect("/")
-        resp.set_cookie(
-            config.COOKIE_NAME,
-            _serializer().dumps("ok"),
-            max_age=config.SESSION_MAX_AGE,
-            httponly=True,
-            secure=config.COOKIE_SECURE,
-            samesite="lax",
-        )
-        return resp
+        return _set_session(_redirect("/"))
     return _redirect("/login?err=1")
 
 
