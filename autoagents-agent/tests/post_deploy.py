@@ -355,6 +355,42 @@ def test_email_third_party(active_tenant):
     ), "no email relay to owner"
 
 
+def test_email_third_party_ttl_expired(active_tenant):
+    """Email parity with the WhatsApp TTL test: after the 3h window, a tagged
+    third-party reply is BLOCKED → one 'conversation closed' note to the sender,
+    and NOTHING relayed to the owner."""
+    import datetime as dt
+
+    t = active_tenant
+    tagged = f"{SENDER_USER}+{t['tid']}@{SENDER_DOMAIN}"
+    contact = f"vendor-{uuid.uuid4().hex[:6]}@pdt.{SENDER_DOMAIN}"
+    now = dt.datetime.now(dt.UTC)
+    ago = lambda h: (now - dt.timedelta(hours=h)).isoformat()
+    # Agent emailed them 5h ago; they first replied 4h ago; window expired 1h ago.
+    DB.collection("messages").document(f"pdt_{uuid.uuid4().hex}").set(
+        {"tenant_id": t["tid"], "channel": "email", "direction": "out", "to": contact,
+         "from": "agent", "body": "earlier outbound", "status": "sent", "ts": ago(5)}
+    )
+    DB.collection("threads").document(f"{t['tid']}:email:{contact}").set(
+        {"tenant_id": t["tid"], "channel": "email", "contact": contact,
+         "first_reply_at": ago(4), "expires_at": ago(1), "last_at": ago(4),
+         "created_at": ago(5), "closed_notified": False, "status": "active"}
+    )
+    r = email_inbound(contact, tagged, "Re: your note", "are we still on?")
+    assert r.status_code == 200, r.text
+    # one courtesy note addressed to the CONTACT (body distinguishes it from the
+    # seeded outbound above; logged even if the actual send fails)
+    assert wait_for(lambda: [m for m in messages(t["tid"], direction="out")
+                             if m.get("channel") == "email" and contact in str(m.get("to", ""))
+                             and "closed" in str(m.get("body", "")).lower()],
+                    ), "no 'conversation closed' note to the third party"
+    # and NOTHING relayed to the owner
+    time.sleep(6)
+    owner = t["email"]
+    assert not [m for m in messages(t["tid"], direction="out")
+                if owner in str(m.get("to", ""))], "expired-window email was relayed to owner!"
+
+
 # --------------------------------------------------------------------------- #
 # RAG helpers for 6 & 7
 # --------------------------------------------------------------------------- #
