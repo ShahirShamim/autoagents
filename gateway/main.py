@@ -533,6 +533,9 @@ async def inbound_whatsapp(request: Request) -> Response:
         for a in attachments
         if _model_supported(a["type"])
     ]
+    # Show a "typing…" indicator to the owner while the agent works (cleared when
+    # the reply is sent). Best-effort — never blocks the turn.
+    clients.wa_typing(tenant_id, reply_to)
     try:
         session_id = clients.ensure_session(tenant_id, state=_session_state(tenant_id))
         reply = clients.query_agent(

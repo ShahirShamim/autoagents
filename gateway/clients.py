@@ -323,6 +323,23 @@ def send_whatsapp(tenant: str, to: str, text: str) -> dict[str, Any]:
     return {"ok": ok, "id": data.get("id", ""), "raw": data}
 
 
+def wa_typing(tenant: str, to: str) -> None:
+    """Best-effort: ask the bridge to show a 'typing…' indicator in this chat
+    while the agent works on a reply. Fire-and-forget — never blocks or raises;
+    the eventual send_whatsapp clears it."""
+    if not (config.WHATSAPP_BRIDGE_URL and config.WHATSAPP_BRIDGE_SECRET and to):
+        return
+    try:
+        requests.post(
+            config.WHATSAPP_BRIDGE_URL.rstrip("/") + "/typing",
+            headers={"X-WA-Secret": config.WHATSAPP_BRIDGE_SECRET},
+            json={"tenant": tenant, "to": to},
+            timeout=3,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # --------------------------------------------------------------------------- #
 # WhatsApp bridge session control (per-tenant linking / pairing)
 # --------------------------------------------------------------------------- #

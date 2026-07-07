@@ -217,6 +217,8 @@ async function _connect(tenant) {
       s.connecting = false;
       s.lastQr = null;
       s.number = digits(sock.user?.id || "");
+      // Broadcast presence so "typing…" indicators render in chats.
+      sock.sendPresenceUpdate("available").catch(() => {});
       console.log(`[${tenant}] connected as ${s.number}`);
     }
     if (connection === "close") {
@@ -295,6 +297,44 @@ async function startAll() {
   }
 }
 
+// ---------- typing / presence ----------
+// Show a "typing…" indicator in a chat while the agent works on a reply. The
+// gateway calls startTyping when it decides an inbound WILL get a reply (owner
+// turns + genuine thread replies — never on dropped/unsolicited messages).
+// WhatsApp auto-clears "composing" after ~25s, so we re-send it until the reply
+// goes out (which clears it) or a safety timeout fires.
+function toJid(to) {
+  return String(to).includes("@")
+    ? String(to)
+    : String(to).replace(/\D/g, "") + "@s.whatsapp.net";
+}
+
+async function startTyping(tenant, to) {
+  const s = sessions.get(tenant);
+  if (!s || !s.connected || !s.sock) return;
+  const jid = toJid(to);
+  s.typing = s.typing || new Map();
+  stopTyping(tenant, jid); // reset any in-flight indicator for this chat
+  s.sock.sendPresenceUpdate("composing", jid).catch(() => {});
+  const refresh = setInterval(() => {
+    s.sock?.sendPresenceUpdate("composing", jid).catch(() => {});
+  }, 8000);
+  const timeout = setTimeout(() => stopTyping(tenant, jid), 45000);
+  s.typing.set(jid, { refresh, timeout });
+}
+
+function stopTyping(tenant, to) {
+  const s = sessions.get(tenant);
+  if (!s || !s.typing) return;
+  const jid = toJid(to);
+  const t = s.typing.get(jid);
+  if (!t) return;
+  clearInterval(t.refresh);
+  clearTimeout(t.timeout);
+  s.typing.delete(jid);
+  s.sock?.sendPresenceUpdate("paused", jid).catch(() => {});
+}
+
 // ---------- HTTP server ----------
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -369,15 +409,23 @@ app.post("/send", async (req, res) => {
   if (!s || !s.connected || !s.sock) {
     return res.status(503).json({ error: "tenant session not connected" });
   }
-  const jid = String(to).includes("@")
-    ? String(to)
-    : String(to).replace(/\D/g, "") + "@s.whatsapp.net";
+  const jid = toJid(to);
+  stopTyping(tenant, jid); // the reply is going out — clear the typing indicator
   try {
     const r = await s.sock.sendMessage(jid, { text: String(text) });
     res.json({ ok: true, id: r?.key?.id || "" });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// Gateway signals "the agent is working on a reply to this chat" → show typing.
+app.post("/typing", async (req, res) => {
+  if (!authed(req)) return res.status(401).json({ error: "unauthorized" });
+  const { tenant, to } = req.body || {};
+  if (!tenant || !to) return res.status(400).json({ error: "tenant and to required" });
+  await startTyping(tenant, to);
+  res.json({ ok: true });
 });
 
 app.listen(PORT, () => console.log(`bridge http on :${PORT}`));
