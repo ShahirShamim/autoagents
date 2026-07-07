@@ -268,7 +268,8 @@ WHATSAPP_BRIDGE_URL; secrets RESEND_API_KEY, WHATSAPP_BRIDGE_SECRET.
 (GOOGLE_CLOUD_PROJECT/LOCATION set in code: project from ADC, location=global.)
 Gateway (Cloud Run): GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION=us-central1,
 AGENT_ENGINE_RESOURCE, ATTACHMENTS_BUCKET, SENDER_EMAIL, ADMIN_EMAILS(`;`-sep),
-WHATSAPP_BRIDGE_URL, GATEWAY_PUBLIC_URL (for magic links), ADMIN_WHATSAPP(`;`-sep, optional);
+WHATSAPP_BRIDGE_URL, GATEWAY_PUBLIC_URL (for magic links), LINK_MAX_AGE_HOURS=24,
+THREAD_TTL_HOURS=3, ADMIN_WHATSAPP(`;`-sep, optional);
 secrets RESEND_API_KEY, RESEND_WEBHOOK_SECRET, TASKS_TOKEN, WHATSAPP_BRIDGE_SECRET, LINK_SECRET.
 Admin (Cloud Run, PUBLIC): GATEWAY_URL (calls `/internal/wa-link`), ADMIN_EMAIL (magic-link
 allowlist), ADMIN_PUBLIC_URL, SENDER_EMAIL, COOKIE_SECURE=true; secrets MAGIC_SECRET
@@ -485,7 +486,7 @@ without a `/`). `connection.update` stores per-tenant qr/connected/number; inbou
 via `key.remoteJidAlt` then `signalRepository.lidMapping.getPNForLID`). Tenant-scoped
 HTTP (all X-WA-Secret gated): `POST /sessions/:tenant/start`, `GET /sessions/:tenant`,
 `GET /sessions/:tenant/qr`, `POST /sessions/:tenant/logout`, `POST /send {tenant,to,text}`,
-`GET /health` → `{status, sessions}`.
+`POST /typing {tenant,to}`, `GET /health` → `{status, sessions}`.
 
 **Gateway routing (`/inbound/whatsapp`).** Trusts `tenant` from the payload (socket =
 tenant). `_wa_is_owner(tenant, pn, lid, from)` = sender matches the tenant's own
@@ -504,11 +505,23 @@ a stored `+923…` outbound matches a `923…` inbound reply. The bridge forward
 The agent's `send_whatsapp` tool also includes its `tenant_id` so sends leave the
 tenant's own number.
 
+**Typing indicator (perceived latency).** The bridge broadcasts presence `available`
+on connect and exposes `POST /typing {tenant,to}` → `sendPresenceUpdate('composing',
+jid)`, re-sent every 8s (WhatsApp auto-clears ~25s) with a 45s safety stop; cleared
+when `/send` fires. The gateway calls `clients.wa_typing(tenant, reply_to)` (fire-and-
+forget) before the agent turn **in the owner branch only** — never on dropped/
+unsolicited inbound or third-party relays — so the owner sees "typing…" during the
+~3–9s turn instead of dead air.
+
 **Self-service linking (gateway, public).** `GET /link?token=<signed>` → QR page
 (itsdangerous `LINK_SECRET`, salt `aa-walink`); proxies `GET /link/{token}/status|qr`
 and `POST /link/{token}/unlink` to the bridge sessions API; `POST /internal/wa-link/
 {tenant}` (X-Tasks-Token) mints + emails the link (admin "Send WhatsApp link" button →
 this). On connect the gateway writes `wa_linked/wa_number/wa_linked_at` to the tenant doc.
+The link **expires 24h after sending** (`LINK_MAX_AGE_HOURS`, enforced at redeem via the
+token's embedded sign-time). The QR page + email make clear the tenant must link a
+**second/dedicated** WhatsApp account (not their personal number — that line becomes the
+assistant's), with numbered Linked-Devices → scan steps.
 
 **Deploy the bridge (gotchas cost real cycles):**
 ```bash

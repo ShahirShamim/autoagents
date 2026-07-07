@@ -370,13 +370,18 @@ gcloud compute instances create-with-container autoagents-wa --zone=us-central1-
 6. **Each tenant links their OWN number (self-service).** The bridge is multi-session —
    one WhatsApp account per tenant — so there is no single shared scan. In the admin
    webapp open a tenant → **Send WhatsApp link** (emails them a private link), or they
-   open it from onboarding. On that link they see a **live QR**; on the dedicated
-   number's phone: WhatsApp → Settings → **Linked Devices → Link a Device** → scan it.
-   The page flips to "✓ Connected" and the number is saved to Cloud Storage
-   (`wa-auth/<tenant>/`), so restarts reconnect with no re-scan. "Change number" =
-   reopen the link → unlink → scan a new one.
+   open it from onboarding. The page + email make clear they must use a **SECOND /
+   dedicated WhatsApp account — not their personal number** (that line becomes the
+   assistant's), and walk them through it. On that link they see a **live QR**; on the
+   second number's phone: WhatsApp → Settings → **Linked Devices → Link a Device** →
+   scan it. The page flips to "✓ Connected" and the number is saved to Cloud Storage,
+   so restarts reconnect with no re-scan. "Change number" = reopen the link → unlink →
+   scan a new one. **The link expires 24 hours after it's sent** — ask for a fresh one
+   if it lapses.
 
 7. **Test:** from your personal phone, message the linked number → the agent replies.
+   While it works you'll see a **"typing…"** indicator in the chat (it covers the few
+   seconds the agent takes), cleared when the reply arrives.
 
 > Bridge code updates: rebuild the image from an **absolute** path, point the VM at the
 > new image **digest** (not `:latest` — the VM caches the tag), then `reset` it. See

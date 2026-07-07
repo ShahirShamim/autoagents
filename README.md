@@ -30,7 +30,8 @@ Built on Google's Agent Development Kit (ADK) on GCP. Private beta.
 | Third-party threads | Agent emails/messages contacts from a tagged/owned identity; replies relayed to the owner within a **3-hour window** |
 | Scheduling | Schedule / list / cancel reminders + follow-ups; Cloud Scheduler tick drives due tasks |
 | Per-tenant agent context | Operator-authored standing instructions prepended to every turn (admin panel) |
-| Self-service WhatsApp linking | Tenant scans a QR from an emailed magic link to attach their **own dedicated** number |
+| Self-service WhatsApp linking | Tenant scans a QR from an emailed magic link (expires 24h) to attach their **own dedicated/second** number |
+| Typing indicator | WhatsApp "typing…" shown to the owner while the agent works (perceived latency) |
 
 ### 1.2 Architecture
 
