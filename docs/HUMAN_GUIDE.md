@@ -624,6 +624,20 @@ tenant's page, each tagged **error** or **warning**. Click **dismiss** once you'
 (Alerts cover the gateway's side of things; an agent failing to send a message on someone's
 behalf shows up in that tenant's message log rather than as an alert.)
 
+### WhatsApp uptime (auto-monitor + weekly ping)
+WhatsApp linking is unofficial (Baileys), so a linked number can **drop after ~2 weeks if
+its phone stays offline** — the agent then goes silent because there's no connected line.
+Two safeguards run automatically:
+- **Liveness monitor** — every 5 minutes the gateway checks each linked tenant's WhatsApp.
+  The moment one drops, it **emails that owner a re-link link** (open it, scan the QR with
+  the assistant's phone) and raises a `wa_session_down` alert in the admin panel. So you
+  find out — with the fix in hand — instead of noticing dead air days later.
+- **Weekly "still running" ping** — every **Monday 9am (Pakistan time)** each linked agent
+  sends its owner a short "I'm up and waiting for your next command" WhatsApp. Reassurance,
+  and it keeps the connection exercised. (Only fires for connected agents; skips paused-off.)
+To keep drops rare, keep the assistant's phone online occasionally. The permanent fix at
+public scale is the official WhatsApp Cloud API.
+
 ### Security reminders
 - The admin password and the WhatsApp bridge secret were shown in chat during setup —
   **rotate both** (`gcloud secrets versions add admin-password --data-file=-`).

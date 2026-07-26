@@ -32,6 +32,7 @@ Built on Google's Agent Development Kit (ADK) on GCP. Private beta.
 | Per-tenant agent context | Operator-authored standing instructions prepended to every turn (admin panel) |
 | Self-service WhatsApp linking | Tenant scans a QR from an emailed magic link (expires 24h) to attach their **own dedicated/second** number |
 | Typing indicator | WhatsApp "typing…" shown to the owner while the agent works (perceived latency) |
+| WhatsApp uptime ops | 5-min liveness monitor emails a re-link on session drop; Mon-9am keep-alive ping to each owner |
 
 ### 1.2 Architecture
 

@@ -254,7 +254,7 @@ VERIFY: `curl http://WA_IP:8080/health` → `connected:true`; message the number
 | Secrets | resend-api-key, resend-webhook-secret, tasks-token, whatsapp-bridge-secret, whatsapp-bridge-url, link-secret, admin-password, admin-magic-secret |
 | Domains | autoagents.jmkn.tech → gateway, admin.autoagents.jmkn.tech → admin (Cloud Run domain mappings; Cloudflare CNAME→ghs, DNS-only) |
 | Service accts | autoagents-gateway@…; runtime service agent gcp-sa-aiplatform-re |
-| Scheduler | autoagents-tasks-tick (*/5 * * * *) |
+| Scheduler | autoagents-tasks-tick (*/5 * * * *) → /tasks/run; autoagents-weekly-keepalive (0 9 * * 1, Asia/Karachi) → /tasks/weekly-keepalive |
 | Resend | domain jmkn.tech (send+recv); webhook email.received |
 | Compute VM | autoagents-wa (e2-micro, us-central1-a), static IP 136.114.229.113, tag wa-bridge |
 | Firewall | allow-wa-bridge (INGRESS tcp:8080, 0.0.0.0/0) |
@@ -522,6 +522,18 @@ The link **expires 24h after sending** (`LINK_MAX_AGE_HOURS`, enforced at redeem
 token's embedded sign-time). The QR page + email make clear the tenant must link a
 **second/dedicated** WhatsApp account (not their personal number — that line becomes the
 assistant's), with numbered Linked-Devices → scan steps.
+
+**Uptime ops (Baileys drops linked devices after ~14 days offline).**
+- *Liveness monitor:* the 5-min tick (`/tasks/run`) runs `_wa_liveness_sweep()` — for
+  each `status=active` + `wa_linked` tenant it hits the bridge `/sessions/<t>`; on a
+  fresh `connected=false` it emails the owner a re-link magic link **once** (deduped via
+  the `wa_alerted` tenant-doc flag, set with `wa_down_at`), raises a `wa_session_down`
+  alert, and clears `wa_alerted` on recovery. Tick returns `{ran, skipped, wa:{checked,
+  down,recovered}}`.
+- *Weekly keep-alive:* `POST /tasks/weekly-keepalive` (X-Tasks-Token), driven by the
+  `autoagents-weekly-keepalive` cron (Mon 09:00 Asia/Karachi), sends each linked +
+  connected owner a "still running, waiting for your next command" WhatsApp — reassurance
+  + exercises the socket. Skips unlinked/disconnected/stopped tenants.
 
 **Deploy the bridge (gotchas cost real cycles):**
 ```bash
