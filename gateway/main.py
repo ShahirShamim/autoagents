@@ -725,6 +725,47 @@ async def internal_ensure_corpus(request: Request, tenant_id: str) -> dict[str, 
     return {"tenant_id": tenant_id, "corpus": clients.ensure_tenant_corpus(tenant_id)}
 
 
+def _wa_liveness_sweep() -> dict[str, int]:
+    """Check each linked tenant's WhatsApp session. On a fresh drop, email the owner
+    a re-link link ONCE and raise an alert; clear the flag when it recovers. Baileys
+    linked devices drop after ~14 days offline, so this catches it before dead air."""
+    checked = down = recovered = 0
+    tdb = clients.db().collection(config.COL_TENANTS)
+    for snap in tdb.where("status", "==", "active").stream():
+        t = snap.to_dict() or {}
+        if not t.get("wa_linked"):
+            continue
+        tid = snap.id
+        checked += 1
+        connected = bool(clients.wa_session_status(tid).get("connected"))
+        alerted = bool(t.get("wa_alerted"))
+        if not connected and not alerted:
+            down += 1
+            owner = tenancy.primary_email(tid)
+            link = f"{config.GATEWAY_PUBLIC_URL.rstrip('/')}/link?token={_make_link_token(tid)}"
+            if owner:
+                clients.send_email(
+                    tid, owner,
+                    "Your assistant's WhatsApp needs re-linking",
+                    "Your autoagents assistant's WhatsApp went offline, so it can't "
+                    "receive messages right now. Re-link in under a minute — open this "
+                    "link and scan the QR with the assistant's phone:\n\n" + link +
+                    "\n\n(This happens if the assistant's phone stays offline a while.)",
+                )
+            clients.record_alert(
+                "wa_session_down",
+                f"tenant {tid} WhatsApp disconnected; re-link emailed to {owner or 'no email on file'}",
+                tenant_id=tid, severity="warning",
+            )
+            tdb.document(tid).set(
+                {"wa_alerted": True, "wa_down_at": clients.now_iso()}, merge=True
+            )
+        elif connected and alerted:
+            recovered += 1
+            tdb.document(tid).set({"wa_alerted": False}, merge=True)
+    return {"checked": checked, "down": down, "recovered": recovered}
+
+
 @app.post("/tasks/run")
 async def tasks_run(request: Request) -> dict[str, Any]:
     """Scheduler tick: execute any due tasks/reminders/followups."""
@@ -762,4 +803,41 @@ async def tasks_run(request: Request) -> dict[str, Any]:
                 severity="error",
             )
             clients.mark_task(task["id"], "error")
-    return {"ran": ran, "skipped": skipped}
+
+    # WhatsApp liveness monitor — never let a bridge hiccup fail the tick.
+    try:
+        health = _wa_liveness_sweep()
+    except Exception:  # noqa: BLE001
+        log.exception("wa liveness sweep failed")
+        health = {"error": 1}
+    return {"ran": ran, "skipped": skipped, "wa": health}
+
+
+@app.post("/tasks/weekly-keepalive")
+async def weekly_keepalive(request: Request) -> dict[str, Any]:
+    """Weekly reassurance ping (Mon 9am Asia/Karachi via Cloud Scheduler): message
+    each linked + connected tenant's owner that their agent is alive and waiting.
+    Doubles as a keep-alive that exercises the WhatsApp socket."""
+    if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    sent = 0
+    skipped = 0
+    for snap in clients.db().collection(config.COL_TENANTS).where("status", "==", "active").stream():
+        t = snap.to_dict() or {}
+        tid = snap.id
+        owner = tenancy.primary_whatsapp(tid)
+        if (
+            not t.get("wa_linked")
+            or not owner
+            or clients.get_agent_status(tid) == "stopped"
+            or not bool(clients.wa_session_status(tid).get("connected"))
+        ):
+            skipped += 1
+            continue
+        clients.send_whatsapp(
+            tid, owner,
+            "Good morning! Your autoagents assistant is up and running, ready for your "
+            "next instruction whenever you need it.",
+        )
+        sent += 1
+    return {"sent": sent, "skipped": skipped}
