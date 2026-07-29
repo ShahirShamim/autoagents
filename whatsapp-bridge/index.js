@@ -198,6 +198,7 @@ async function _connect(tenant) {
     lastQr: null,
     number: "",
     saveCreds,
+    retries: 0,
   };
   sessions.set(tenant, s);
 
@@ -216,6 +217,7 @@ async function _connect(tenant) {
       s.connected = true;
       s.connecting = false;
       s.lastQr = null;
+      s.retries = 0; // stable again — reset backoff
       s.number = digits(sock.user?.id || "");
       // Broadcast presence so "typing…" indicators render in chats.
       sock.sendPresenceUpdate("available").catch(() => {});
@@ -230,9 +232,15 @@ async function _connect(tenant) {
         await clearAuth(tenant);
         sessions.delete(tenant);
       } else {
-        console.log(`[${tenant}] connection closed (${code}); reconnecting`);
+        // Exponential backoff + jitter so a WhatsApp-side reject (405/503) doesn't
+        // turn into a tight 3s reconnect storm (rate-limit / ban risk). Resets to
+        // 0 on a successful "open".
+        s.retries = (s.retries || 0) + 1;
+        const delay =
+          Math.min(3000 * 2 ** (s.retries - 1), 60000) + Math.floor(Math.random() * 1000);
+        console.log(`[${tenant}] connection closed (${code}); reconnect #${s.retries} in ${delay}ms`);
         s.connecting = true; // keep guarded while we retry
-        setTimeout(() => _connect(tenant), 3000);
+        setTimeout(() => _connect(tenant), delay);
       }
     }
   });

@@ -725,11 +725,18 @@ async def internal_ensure_corpus(request: Request, tenant_id: str) -> dict[str, 
     return {"tenant_id": tenant_id, "corpus": clients.ensure_tenant_corpus(tenant_id)}
 
 
+# A WhatsApp session must read down for this many consecutive ticks (~5 min each)
+# before we page the owner — a transient 405/503 blip that self-heals within one
+# tick never alerts.
+WA_DOWN_GRACE_TICKS = 2
+
+
 def _wa_liveness_sweep() -> dict[str, int]:
-    """Check each linked tenant's WhatsApp session. On a fresh drop, email the owner
-    a re-link link ONCE and raise an alert; clear the flag when it recovers. Baileys
-    linked devices drop after ~14 days offline, so this catches it before dead air."""
-    checked = down = recovered = 0
+    """Check each linked tenant's WhatsApp session. Only after WA_DOWN_GRACE_TICKS
+    consecutive down ticks (a sustained drop, not a blip) do we email the owner a
+    re-link link ONCE and raise an alert; both clear on recovery. (Baileys drops
+    linked devices after ~14 days offline; transient server-side 405/503 recover.)"""
+    checked = down = recovered = pending = 0
     tdb = clients.db().collection(config.COL_TENANTS)
     for snap in tdb.where("status", "==", "active").stream():
         t = snap.to_dict() or {}
@@ -739,31 +746,39 @@ def _wa_liveness_sweep() -> dict[str, int]:
         checked += 1
         connected = bool(clients.wa_session_status(tid).get("connected"))
         alerted = bool(t.get("wa_alerted"))
-        if not connected and not alerted:
-            down += 1
-            owner = tenancy.primary_email(tid)
-            link = f"{config.GATEWAY_PUBLIC_URL.rstrip('/')}/link?token={_make_link_token(tid)}"
-            if owner:
-                clients.send_email(
-                    tid, owner,
-                    "Your assistant's WhatsApp needs re-linking",
-                    "Your autoagents assistant's WhatsApp went offline, so it can't "
-                    "receive messages right now. Re-link in under a minute — open this "
-                    "link and scan the QR with the assistant's phone:\n\n" + link +
-                    "\n\n(This happens if the assistant's phone stays offline a while.)",
+        if not connected:
+            strikes = int(t.get("wa_down_count", 0)) + 1
+            if strikes >= WA_DOWN_GRACE_TICKS and not alerted:
+                down += 1
+                owner = tenancy.primary_email(tid)
+                link = f"{config.GATEWAY_PUBLIC_URL.rstrip('/')}/link?token={_make_link_token(tid)}"
+                if owner:
+                    clients.send_email(
+                        tid, owner,
+                        "Your assistant's WhatsApp needs re-linking",
+                        "Your autoagents assistant's WhatsApp went offline, so it can't "
+                        "receive messages right now. Re-link in under a minute — open this "
+                        "link and scan the QR with the assistant's phone:\n\n" + link +
+                        "\n\n(This happens if the assistant's phone stays offline a while.)",
+                    )
+                clients.record_alert(
+                    "wa_session_down",
+                    f"tenant {tid} WhatsApp disconnected; re-link emailed to {owner or 'no email on file'}",
+                    tenant_id=tid, severity="warning",
                 )
-            clients.record_alert(
-                "wa_session_down",
-                f"tenant {tid} WhatsApp disconnected; re-link emailed to {owner or 'no email on file'}",
-                tenant_id=tid, severity="warning",
-            )
-            tdb.document(tid).set(
-                {"wa_alerted": True, "wa_down_at": clients.now_iso()}, merge=True
-            )
-        elif connected and alerted:
-            recovered += 1
-            tdb.document(tid).set({"wa_alerted": False}, merge=True)
-    return {"checked": checked, "down": down, "recovered": recovered}
+                tdb.document(tid).set(
+                    {"wa_alerted": True, "wa_down_at": clients.now_iso(), "wa_down_count": strikes},
+                    merge=True,
+                )
+            else:
+                pending += 1
+                tdb.document(tid).set({"wa_down_count": strikes}, merge=True)
+        elif alerted or t.get("wa_down_count"):
+            # Recovered, or a sub-grace blip cleared before it ever paged.
+            if alerted:
+                recovered += 1
+            tdb.document(tid).set({"wa_alerted": False, "wa_down_count": 0}, merge=True)
+    return {"checked": checked, "down": down, "recovered": recovered, "pending": pending}
 
 
 @app.post("/tasks/run")
