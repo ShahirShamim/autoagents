@@ -412,7 +412,39 @@ the gateway prepends it to every turn (`_framed`, see §on context injection).
 - **IAM propagation lag** can make a just-granted role (e.g. `aiplatform.user` for corpus create)
   fail for ~1–2 min; `ensure_tenant_corpus` logs + degrades, backfill via `/internal/ensure-corpus/{tid}`.
 - **`agents-cli deploy` strips `context_spec`** → native Memory Bank can't be wired on the agent;
-  memory is orchestrated in the gateway instead.
+  memory is orchestrated in the gateway instead. **This also wipes the Memory Bank model pin +
+  memory topics — re-apply after every agent deploy (see below).**
+
+### Memory Bank model pin (2.5 deprecation)
+`contextSpec.memoryBankConfig` on the engine controls how memories are generated. Two fields
+fall back to Google-managed defaults when unset:
+
+| Field | Default if unset | Ours |
+|---|---|---|
+| `generationConfig.model` | `gemini-2.5-flash` (**deprecated 2026-10-20**, price hike 2027-01-28) | **pinned `gemini-3.5-flash`** |
+| `similaritySearchConfig.embeddingModel` | `text-embedding-005` (English-centric) | **left at default — deliberate** |
+
+The generation model was pinned 2026-07-29 because the default was the deprecated 2.5 Flash —
+it never appeared in our code (all agent turns are `gemini-3.5-flash`); the usage was Memory
+Bank extracting/consolidating memories *inside* the engine, which is why it never showed in the
+`usage` collection. The embedding model is intentionally NOT changed: all inbound traffic is
+English (0/174 messages contained Urdu/Arabic script) and memories are stored in English, so
+`text-embedding-005` matches; switching risks re-embedding existing memories for no gain.
+Revisit only if real non-English traffic appears.
+
+Re-apply the pin (idempotent; `updateMask` touches ONLY that subfield, so memory topics survive):
+```bash
+TOK=$(gcloud auth print-access-token)
+E="https://us-central1-aiplatform.googleapis.com/v1beta1/projects/PROJECT_ID/locations/us-central1/reasoningEngines/ENGINE_ID"
+M="projects/PROJECT_ID/locations/us-central1/publishers/google/models/gemini-3.5-flash"
+curl -s -X PATCH -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
+  "$E?updateMask=contextSpec.memoryBankConfig.generationConfig" \
+  -d "{\"contextSpec\":{\"memoryBankConfig\":{\"generationConfig\":{\"model\":\"$M\"}}}}"
+```
+VERIFY: `GET $E` → `contextSpec.memoryBankConfig.generationConfig.model` is `gemini-3.5-flash`
+and `customizationConfigs` still lists USER_PERSONAL_INFO / USER_PREFERENCES / EXPLICIT_INSTRUCTIONS.
+Memory generation only runs on session rotation (~8h idle), so a bad model surfaces later as a
+`memory_flush_failed` alert rather than immediately — check the admin alerts panel after changing it.
 
 ### PITFALL — Agent Runtime ignores `.env`
 The deployed agent runs on `app/config.py` defaults + the engine's `env` / `secretEnv`, NOT

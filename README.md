@@ -96,7 +96,7 @@ pitches/              Client pitch deck (HTML)
 
 ### 1.4 Tech stack
 
-- **Agent:** Google ADK (`google-agents-cli`), Vertex AI Agent Engine, Gemini `gemini-3.5-flash`, Vertex RAG Engine (Basic tier), ADK Memory Bank.
+- **Agent:** Google ADK (`google-agents-cli`), Vertex AI Agent Engine, Gemini `gemini-3.5-flash`, Vertex RAG Engine (Basic tier), ADK Memory Bank (generation model pinned to `gemini-3.5-flash` — see `docs/AGENT_GUIDE.md`; the unset default was the deprecated 2.5 Flash).
 - **Services:** Python 3.12, FastAPI + Uvicorn, Cloud Run (source deploys via Cloud Build + Dockerfile).
 - **Bridge:** Node.js, [Baileys](https://github.com/WhiskeySockets/Baileys) (unofficial WhatsApp Web), on a GCE e2-micro.
 - **Data:** Firestore (Native), Cloud Storage, Vertex RAG corpora, Secret Manager.
