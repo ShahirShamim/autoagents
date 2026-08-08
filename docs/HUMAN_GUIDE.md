@@ -472,29 +472,41 @@ gcloud compute instances create-with-container autoagents-wa --zone=us-central1-
 
 ```
 autoagents/
+├── README.md                # technical spec: architecture, data model, flows, endpoints
 ├── .agents-cli-spec.md      # the agent's spec (what it is)
 ├── steps.md                 # running build log
+├── improvements.md          # codebase-review backlog (F1–F19), not yet actioned
 ├── docs/
 │   ├── HUMAN_GUIDE.md       # this file
-│   └── AGENT_GUIDE.md       # machine-oriented version
+│   ├── AGENT_GUIDE.md       # machine-oriented version
+│   └── MULTI_TENANT_*.md    # multi-tenant design + build plan (historical; shipped)
 ├── autoagents-agent/        # the brain (ADK project)
 │   ├── app/
-│   │   ├── agent.py         # the agent: model, instruction, tools, Memory Bank
-│   │   ├── tools.py         # send_email, schedule_task, search_documents, ...
+│   │   ├── agent.py         # the agent: model, instruction, tools
+│   │   ├── tools.py         # send_email, send_whatsapp, schedule_task, search_documents, ...
 │   │   ├── config.py        # central config
 │   │   ├── retrievers.py    # (scaffold) Vertex AI Search tool — unused now
 │   │   └── mcp_server.py    # exposes the tools over MCP
+│   ├── deploy.sh            # ALWAYS deploy the brain with this (not a bare agents-cli deploy)
+│   ├── tests/post_deploy.py # live end-to-end suite against the deployed stack (11 tests)
 │   ├── scripts/setup_rag_corpus.py
 │   ├── firestore.indexes.json
 │   └── .env                 # local config + secrets (gitignored)
-├── gateway/                 # the Cloud Run service
-│   ├── main.py              # /inbound/email, /inbound/whatsapp, /tasks/run, /health
+├── gateway/                 # the Cloud Run service — autoagents.jmkn.tech
+│   ├── main.py              # /inbound/{email,whatsapp}, /link*, /tasks/*, /health
 │   ├── clients.py           # Firestore, GCS, Resend, WhatsApp, Agent Runtime helpers
+│   ├── tenancy.py           # identity → tenant resolution, thread TTL, agent context
 │   ├── config.py
 │   ├── Dockerfile
 │   └── requirements.txt
+├── admin/                   # the operator console — admin.autoagents.jmkn.tech
+│   ├── main.py              # magic-link auth, tenant CRUD, run-state, analytics, alerts
+│   ├── tenancy.py
+│   ├── config.py
+│   └── Dockerfile
+├── Design/design.md         # JMKN design system (the admin UI follows it)
 └── whatsapp-bridge/         # the Baileys bridge (Node) on the e2-micro VM
-    ├── index.js             # WhatsApp connection, /qr, /send, /health, GCS auth
+    ├── index.js             # one socket per tenant, /sessions/*, /send, /typing, /health
     ├── package.json
     └── Dockerfile
 ```
@@ -507,12 +519,21 @@ autoagents/
 memory, RAG, scheduling, and logging.
 
 **Deferred (v2):**
-- **Voice calls** — need a provider/budget decision (e.g. Twilio). Not free.
+- **Voice calls** — researched and **parked**. The short version: Baileys (what we use for
+  WhatsApp) can see that a call is happening but cannot send or receive call *audio* at all.
+  The only community library that can is outbound-only, built on scraped internals that break
+  whenever WhatsApp updates, and risks getting the tenant's number **banned** — which would
+  kill their whole assistant, not just calling. The official WhatsApp Business Calling API is
+  legitimate but requires Business Platform numbers, which cannot also be used in the normal
+  WhatsApp app — so it conflicts with our QR-linking model. The realistic path is **async
+  voice notes** (the agent speaks a reply as a voice message) rather than live calls.
 - **WhatsApp groups** — DMs only for now; group policy + WhatsApp admin commands later.
 - **Loop guard** — ignore self-sent email (defensive).
 - **Daily digest** — a scheduled summary email.
 - **Observability dashboards** — Cloud Trace / BigQuery analytics.
-- **Rotate `whatsapp-bridge-secret`** — it was shown in chat during pairing.
+- **Rotate the exposed secrets** — the admin password, `resend-api-key` and
+  `whatsapp-bridge-secret` were all shown in development chat. Rotate before any public launch;
+  this matters more now that the admin console is on a public domain.
 ```
 
 ---

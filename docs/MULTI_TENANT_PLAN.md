@@ -8,6 +8,15 @@ Each phase lists **changes**, **new files/resources**, and a **verify** gate.
 Phases are independently shippable; the system keeps working for the existing user
 throughout (migrated as the first tenant). Nothing deploys without your OK.
 
+> **Status: ALL PHASES COMPLETE AND LIVE (0–7 shipped 2026-06-25 → 2026-06-27), plus the
+> post-plan work listed at the bottom of this file.** Sequencing option **A (full build)** was
+> taken. This document is now a historical record — the phase-by-phase verify gates below all
+> passed. For current behaviour see `README.md` and `docs/AGENT_GUIDE.md` §10–§12; for what
+> happened after the plan closed, see `steps.md`.
+>
+> Note the header above says "shared corpus + tenant_id filter" — that decision was **reversed
+> during Phase 3** in favour of a **corpus per tenant**. See `MULTI_TENANT_SCOPE.md`.
+
 ---
 
 ## Phase 0 — Validation spikes (de-risk first, ~30 min, read-only)
@@ -378,3 +387,19 @@ All phases shipped + verified live. Deployables: Agent Runtime brain (tenant-awa
 - **Durable runtime config + web_search.** Agent config (bridge URL + secrets) moved to
   Secret Manager `secretEnv` (survives redeploys; deploy via `deploy.sh`); a consent-gated
   `web_search` tool was added.
+
+## Shipped beyond the original plan (2026-07)
+
+- **Per-tenant agent context.** The admin panel can set standing instructions per tenant;
+  the gateway prepends them to every prompt, read fresh from the tenant doc each turn.
+- **Public domains + admin magic-link auth.** `autoagents.jmkn.tech` (gateway) and
+  `admin.autoagents.jmkn.tech` (admin). The Phase-6 shared password is now break-glass only;
+  primary sign-in is a 15-min emailed magic link to one allowlisted address.
+- **WhatsApp link tokens expire 24h**, and the link page instructs tenants to link a
+  **second/dedicated** WhatsApp account rather than their personal one.
+- **Uptime ops.** A 5-min liveness sweep (2-tick grace) emails a re-link when a tenant's
+  Baileys session drops, and a Monday-09:00 keep-alive WhatsApp keeps linked devices from
+  expiring — the failure that took tenant_0 offline for days before it existed.
+- **Typing indicator** on WhatsApp while the agent thinks.
+- **Memory Bank model pinned** to `gemini-3.5-flash` ahead of the Gemini 2.5 shutdown
+  (2026-10-20); it had been silently defaulting to the deprecated 2.5 Flash.

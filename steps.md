@@ -112,17 +112,34 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
 - Baileys fires `creds.update` constantly → **debounce + sequential, non-resumable** GCS backup, else the 1GB e2-micro socket-hangs and HTTP flaps.
 - `create-with-container` shows a deprecation warning (container-VM startup agent) — works for now.
 
+## Phase 10 — Productionisation  `[x]`  ✅ LIVE
+- [x] Per-tenant **agent context injection** (admin-authored standing instructions, read fresh each turn)
+- [x] Admin UI restyle (JMKN design system + shadcn patterns, light/dark)
+- [x] **Custom domains**: `autoagents.jmkn.tech` (gateway) + `admin.autoagents.jmkn.tech` (admin)
+- [x] Admin **email magic-link sign-in** (allowlisted address; password kept as break-glass)
+- [x] WhatsApp link URLs expire **24h** after sending; link page guides using a SECOND WhatsApp account
+- [x] WhatsApp **typing indicator** while the agent works
+- [x] WhatsApp **liveness monitor** (5-min sweep, 2-tick grace) + **Mon-09:00 keep-alive** ping
+- [x] Bridge **reconnect backoff** (3s→60s + jitter)
+- [x] Memory Bank generation model **pinned** to `gemini-3.5-flash` (2.5 deprecation)
+
 ## v2 (deferred)
-- [ ] Voice calls (decide provider + budget)
+- [ ] Voice calls — researched 2026-07-29, **parked by user**. Baileys has no call audio;
+      only unsafe scraped-WASM libs or the Business Calling API (incompatible with QR linking).
+      Async voice notes are the viable path. Memo: `~/.claude/plans/glistening-seeking-garden.md`.
 - [ ] WhatsApp groups (DMs only in v1) + WA admin commands (ADMIN_WHATSAPP)
-- [ ] Optional web dashboard
+- [ ] Loop guard (ignore self-sent email) · daily digest · observability dashboards
+- [ ] **Rotate exposed secrets** before public launch: `admin-password`, `resend-api-key`,
+      `whatsapp-bridge-secret` (all surfaced in dev chat; admin is now internet-facing)
 
 ---
 
 ## Documentation
+- `README.md` — root technical spec: architecture, data model, request flows, endpoints, deploy, testing.
 - `docs/HUMAN_GUIDE.md` — novice walkthrough: concepts, prerequisites, step-by-step setup, parameters, operations, troubleshooting.
 - `docs/AGENT_GUIDE.md` — machine-oriented: exact ordered commands, verification checks, resource inventory, env/secrets/IAM, pitfalls.
-- `docs/MULTI_TENANT_SCOPE.md` — scope for multi-user (agent-per-user) + admin webapp. Decisions LOCKED; not yet built.
+- `docs/MULTI_TENANT_SCOPE.md` / `docs/MULTI_TENANT_PLAN.md` — multi-user design + build plan. **Built and live** (historical record).
+- `improvements.md` — codebase-review backlog (F1–F19), not yet actioned.
 
 ## Activity Log
 - 2026-06-25 — Phase 0 done. Clarified scope, confirmed `gemini-3.5-flash`, verified
@@ -339,3 +356,75 @@ Method: **Baileys** (unofficial WhatsApp Web, same as openclaw). Dedicated numbe
     so a stored `+923…` outbound didn't match a `923…` inbound reply → genuine third-party
     replies were dropped as unsolicited. Now compares digits only (`_match_contact`); the
     third-party test stores a `+`-prefixed outbound to lock it.
+- 2026-07-26 — **Per-tenant agent context injection.** Operators can write standing instructions
+  per tenant in the admin panel (`tenants/<id>.agent_context`); the gateway's `_framed()` prepends
+  them to every prompt at all 5 `query_agent` call sites. Read **fresh from the tenant doc each
+  turn** (not session state, which is fixed at session creation) → edits take effect on the very
+  next message, no session rotation or redeploy. Locked by `test_agent_context_injection`
+  (codeword E2E). gateway rev 00019-b9w, admin rev 00004-r2v.
+- 2026-07-26 — **Admin UI restyle** to the JMKN design system (`Design/design.md`) + shadcn
+  patterns: Inter, Apple Silver / Obsidian palette, gold accent, glass cards, 20/8px radii,
+  pre-paint light/dark toggle (localStorage, no FOUC), mobile breakpoint. Server-rendered HTML
+  only — still no JS framework.
+- 2026-07-26 — **Custom domains + admin magic-link auth.**
+  - Cloud Run domain mappings: `autoagents.jmkn.tech` → gateway, `admin.autoagents.jmkn.tech`
+    → admin. Cloudflare CNAME → `ghs.googlehosted.com`, **DNS-only (grey cloud)** — the orange
+    proxy breaks Google managed-cert validation. Certs took ~11 min to provision.
+  - **Chose subdomains over an `/admin` path**: a Cloud Run domain mapping is one-service-per-host,
+    so a path split would have needed a Worker or an external LB.
+  - Admin sign-in is now an **email magic link** to one allowlisted address (`itsdangerous`,
+    `MAGIC_SECRET` from Secret Manager `admin-magic-secret`, salts `aa-magic`/`aa-admin`, 15-min
+    link → 8h session cookie). The email prompt returns a **neutral response** so the allowlist
+    isn't probeable. The shared password stays as break-glass only.
+  - Note: the admin subdomain required `allUsers` run.invoker — domain mappings serve anonymous
+    traffic — so the console went from private-behind-a-proxy to **internet-facing**. Verified
+    end-to-end incl. rejection of a forged email.
+- 2026-07-26 — **WhatsApp link hardening.** Link tokens now expire **24h after sending**
+  (`LINK_MAX_AGE_HOURS`, was 30 days) — enforced at redeem, so already-sent links die too. The
+  link page now leads with a gold warning that the tenant must use a **SECOND WhatsApp account,
+  not their personal one**, followed by numbered Linked-Devices steps.
+- 2026-07-26 — **Email 3h TTL test parity.** `test_email_third_party_ttl_expired` mirrors the
+  WhatsApp one: seed an expired thread → assert one "conversation closed" courtesy note and
+  **nothing relayed to the owner**. Assertion matches on `"closed" in body` because the seeded
+  outbound is also addressed to the contact. Suite now **11 tests**.
+- 2026-07-26 — **Latency measured** (was guesswork). Warm text turn **~3.2s**; session creation
+  adds **~1.6s**; a voice note ≈ `3.2s + ~1s + 0.09s × audio_seconds` (10s→5.0s, 30s→6.6s,
+  60s→8.8s). **Cold start is a non-issue** — the 5-min scheduler tick keeps the gateway warm
+  (`/tasks/run` latencies 0.05–0.25s). An earlier claim that cold starts dominated was wrong.
+- 2026-07-26 — **WhatsApp typing indicator.** Bridge exposes `POST /typing` →
+  `sendPresenceUpdate('composing')`, refreshed every **8s** (WhatsApp auto-clears at ~25s) with a
+  45s safety stop; `/send` clears it first. Gateway calls it fire-and-forget before the owner's
+  agent turn only (not third-party relays). Purely perceptual — hides the ~3–9s think time.
+- 2026-07-26 — **tenant_1 removed** (full purge: identities, messages, tasks, threads, usage,
+  alerts, sessions, RAG corpus). 2 real tenants remain (tenant_0, tenant_2).
+- 2026-07-27 — **Agent stopped replying — diagnosed.** tenant_0's Baileys linked device had
+  expired (WhatsApp drops linked devices after **~14 days offline**). Re-linked. Root cause was
+  silent: nothing monitored session liveness.
+- 2026-07-27 — **WhatsApp uptime ops.** (a) `_wa_liveness_sweep()` runs on every `/tasks/run`
+  tick: for each active, `wa_linked` tenant, check bridge connectivity; on a confirmed drop email
+  the owner a fresh re-link + raise a `wa_session_down` alert; clear on recovery. Tick now returns
+  `{ran, skipped, wa:{checked,down,recovered,pending}}`. (b) New `POST /tasks/weekly-keepalive` +
+  Cloud Scheduler `autoagents-weekly-keepalive` (**Mon 09:00 Asia/Karachi**) WhatsApps each linked
+  owner "still running and waiting for your next command" — keeps the account warm so it can't
+  time out. Skips unlinked / disconnected / stopped tenants.
+- 2026-07-27 — **`improvements.md`** committed: a 1,900-line codebase-review backlog (F1–F19).
+  Not actioned.
+- 2026-07-29 — **Reconnect storm + false alarms fixed.** A random disconnect traced to Baileys
+  reconnecting immediately in a tight loop on close codes 503/405, which WhatsApp then throttled.
+  Two fixes: (a) bridge reconnects with **exponential backoff + jitter** (3s → 60s cap, reset on
+  `open`); (b) the monitor needs **2 consecutive failed ticks** (`WA_DOWN_GRACE_TICKS`, ~10 min)
+  before alerting, so a mid-reconnect blip no longer emails the user. Post-deploy suite 11/11.
+- 2026-07-29 — **Gemini 2.5 deprecation handled.** GCP notice: 2.5 Flash-Lite/Flash/Pro
+  discontinued **2026-10-20**. The agent already runs `gemini-3.5-flash`; the exposure was
+  **Memory Bank**, whose `contextSpec.memoryBankConfig.generationConfig.model` was **unset** and
+  therefore defaulting to `gemini-2.5-flash`. Pinned to `gemini-3.5-flash` via PATCH with an
+  `updateMask` (preserves sibling fields + the 3 memory topics). `similaritySearchConfig.
+  embeddingModel` deliberately **left** at `text-embedding-005` — an earlier concern about Urdu
+  retrieval was checked against the data and was wrong (**0 of 174** inbound messages contain
+  Urdu/Arabic script; all memories are English). ⚠️ `agents-cli deploy` **strips `context_spec`**,
+  so the pin + topics must be re-applied after every agent deploy — command in AGENT_GUIDE §10.
+- 2026-07-29 — **WhatsApp voice calling researched, PARKED by user.** Baileys exposes call
+  *events* only, no audio. Options were an unsafe community lib (scraped VoIP WASM, outbound-only,
+  ban risk to the tenant's number) or the official Business Calling API (needs Business Platform
+  numbers, which can't also be used in the normal app — conflicts with QR linking). Async voice
+  notes (TTS + PTT send) remain the cheap path. No code written.

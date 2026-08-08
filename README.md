@@ -101,7 +101,8 @@ pitches/              Client pitch deck (HTML)
 - **Bridge:** Node.js, [Baileys](https://github.com/WhiskeySockets/Baileys) (unofficial WhatsApp Web), on a GCE e2-micro.
 - **Data:** Firestore (Native), Cloud Storage, Vertex RAG corpora, Secret Manager.
 - **Messaging:** [Resend](https://resend.com) (email send + inbound webhook, Svix-signed), Baileys (WhatsApp).
-- **Scheduling:** Cloud Scheduler (`*/5 * * * *` → gateway `/tasks/run`).
+- **Scheduling:** Cloud Scheduler — `autoagents-tasks-tick` (`*/5 * * * *` → `/tasks/run`; also keeps the
+  gateway warm) and `autoagents-weekly-keepalive` (`0 9 * * 1`, Asia/Karachi → `/tasks/weekly-keepalive`).
 - **DNS/TLS:** Cloud Run domain mappings; Cloudflare DNS (CNAME → `ghs.googlehosted.com`, DNS-only); Google-managed certs.
 
 ### 1.5 Deployment (live)
@@ -124,7 +125,7 @@ pitches/              Client pitch deck (HTML)
 
 | Collection | Doc id | Purpose |
 |---|---|---|
-| `tenants` | `<tenant_id>` | name, status (`pending`/`active`/`disabled`), `emails[]`, `phones[]`, `rag_corpus`, `wa_linked`/`wa_number`, `agent_context`, `notes` |
+| `tenants` | `<tenant_id>` | name, status (`pending`/`active`/`disabled`), `emails[]`, `phones[]`, `rag_corpus`, `wa_linked`/`wa_number`, `agent_context`, `notes`, liveness flags (`wa_alerted`, `wa_down_count`, `wa_down_at`) |
 | `identities` | `email:<addr>` / `phone:<digits>` | routing key → `tenant_id` (inbound sender resolution) |
 | `agent_state` | `<tenant_id>` | per-agent run-state: `running` / `paused` / `stopped` |
 | `agent_sessions` | `<tenant_id>` | pointer to the tenant's live ADK session + `last_at` (idle rotation) |
@@ -176,7 +177,12 @@ for `running` tenants are executed by their agent.
 | POST | `/link/{token}/unlink` | signed token | unlink / change number |
 | POST | `/internal/wa-link/{tenant}` | `X-Tasks-Token` | mint + email a linking magic link |
 | POST | `/internal/ensure-corpus/{tenant}` | `X-Tasks-Token` | provision/report a tenant RAG corpus |
-| POST | `/tasks/run` | `X-Tasks-Token` | run due scheduled tasks (Cloud Scheduler) |
+| POST | `/tasks/run` | `X-Tasks-Token` | run due scheduled tasks + WhatsApp liveness sweep (Cloud Scheduler, `*/5`) |
+| POST | `/tasks/weekly-keepalive` | `X-Tasks-Token` | Mon-09:00 "still running" ping to every linked owner |
+
+The bridge's own API (VM-internal, `X-WA-Secret`): `POST /sessions/{tenant}/start`,
+`GET /sessions/{tenant}` (status), `GET /sessions/{tenant}/qr`, `POST /sessions/{tenant}/logout`,
+`POST /send`, `POST /typing`, `GET /health`.
 
 ### 1.9 Configuration (env / secrets)
 
@@ -216,8 +222,8 @@ cd autoagents-agent && uv run pytest tests/post_deploy.py -v -s
 ```
 
 Covers: onboarding, owner email/WhatsApp turns, per-tenant agent-context injection,
-third-party email/WhatsApp relay, unsolicited-drop, the 3-hour TTL, long-term RAG storage,
-and cross-tenant no-leak. (10 tests.)
+third-party email/WhatsApp relay, unsolicited-drop, the 3-hour TTL on **both** channels,
+long-term RAG storage, and cross-tenant no-leak. (11 tests.)
 
 ---
 

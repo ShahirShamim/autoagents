@@ -37,6 +37,15 @@ Run `uv run pytest tests/unit tests/integration`. Fix issues until all tests pas
 > `./deploy.sh`. If the bridge IP changes, update the `whatsapp-bridge-url`
 > secret (see `deploy.sh` header), don't touch env vars.
 
+> **⚠️ Every deploy strips `context_spec`.** `agents-cli deploy` wipes the
+> engine's Memory Bank config — both the generation-model pin and the 3 managed
+> memory topics. Left unpinned it silently falls back to `gemini-2.5-flash`,
+> **which shuts down 2026-10-20**. Re-apply the PATCH after every deploy; exact
+> command in `../docs/AGENT_GUIDE.md` §10 ("Memory Bank model pin"). Failure is
+> silent at deploy time — it surfaces later as a `memory_flush_failed` alert in
+> the admin console, because memory generation only runs on session rotation
+> (~8h idle).
+
 ### Phase 6: Production Deployment
 Ask the user: Option A (simple single-project) or Option B (full CI/CD pipeline with `agents-cli infra cicd`).
 

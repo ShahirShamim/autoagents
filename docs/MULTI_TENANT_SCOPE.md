@@ -4,7 +4,25 @@ Scoping the move from a single personal assistant to a **multi-user** system whe
 each user has "their own agent": isolated memory, documents, tasks, and logs —
 reached by messaging from their assigned email/phone — administered via a small webapp.
 
-> Status: **SCOPE ONLY** — no code changes yet. Locks the design + decisions first.
+> **Status: SHIPPED (2026-06-25 → 2026-06-27). This document is a historical record of the
+> design decisions, not a to-do.** The system described here is live and serving real tenants.
+> For how it actually works today, read `README.md` and `docs/AGENT_GUIDE.md` §10–§12.
+>
+> **Two locked decisions were later overturned by reality — do not follow this doc on these:**
+>
+> | Scoped here | Shipped instead | Why |
+> |---|---|---|
+> | One shared WhatsApp number for all tenants | **One linked WhatsApp account per tenant** (multi-session bridge, self-service QR link) | Inbound arrives as a rotating `@lid`, not the phone — sender-based routing was unresolvable. Making the account the tenant boundary removed the ambiguity entirely. |
+> | Shared RAG corpus + `tenant_id` metadata filter | **One RAG corpus per tenant** | The deployed `import_files` has no per-file metadata parameter; separate corpora give physical isolation at no always-on cost. |
+>
+> Email *is* still a single shared domain routed by sender (`assistant+<tenant>@jmkn.tech`),
+> as scoped. Admin auth moved from shared-password-only to **email magic link** (password
+> retained as break-glass).
+>
+> **Open risks (§7) resolved:** both Phase-0 spikes passed (`ToolContext.state` injection works;
+> Memory Bank isolates by `user_id`, once it was actually enabled on the engine — it never had
+> been). RAG corpus quota is still the resource that grows per tenant. Email spoofing remains
+> an **accepted** risk for the trusted beta group.
 
 ---
 

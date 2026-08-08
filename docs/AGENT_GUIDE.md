@@ -349,10 +349,24 @@ AUTH_DIR, PORT.
 
 ## 9. DEFERRED (v2)
 
-Voice calls (provider/budget), WhatsApp groups + WA admin (DMs only now), loop-guard
-(ignore sender==SENDER_EMAIL), daily-digest scheduler job, observability dashboards,
-full inline-bytes multimodal (currently GCS file_data, which is sufficient),
-rotate whatsapp-bridge-secret.
+WhatsApp groups + WA admin (DMs only now), loop-guard (ignore sender==SENDER_EMAIL),
+daily-digest scheduler job, observability dashboards, full inline-bytes multimodal
+(currently GCS file_data, which is sufficient).
+
+**Voice calls — researched 2026-07-29, PARKED.** Baileys exposes call *events* only
+(`offer`/`ringing`/`reject`/`accept`) and no call audio; live calls need a real-time media
+stack (WebRTC/RTP/Opus) plus a streaming brain (measured turn latency is 3.2s text / 5–9s
+voice note — far above call turn-taking). `baileys-caller` is outbound-only, wraps VoIP WASM
+scraped via `npm run fetch-wasm`, and risks banning the tenant's number. The official
+WhatsApp Business Calling API is GA and does not exclude Pakistan, but requires Business
+Platform numbers that cannot also be used in the normal app — incompatible with per-tenant
+QR linking. Viable path if resumed: **async voice notes** — bridge `/send` gains
+`{audio, mimetype:"audio/ogg; codecs=opus", ptt:true}` (ffmpeg → mono libopus), TTS via
+Gemini-TTS/Chirp 3 HD, and transcription for free (Gemini already consumes inbound audio as
+a `file_data` part — there is no STT step anywhere in the repo today).
+
+**Rotate the exposed secrets** — `admin-password`, `resend-api-key`, `whatsapp-bridge-secret`
+were all surfaced in development chat. Higher priority now that admin is internet-facing.
 ```
 
 ---
@@ -601,9 +615,12 @@ dir after the blob exists: `gsutil -m rm -r gs://…/wa-auth/<tenant>/`.
 `autoagents-agent/tests/post_deploy.py` — live end-to-end smoke suite against the
 DEPLOYED gateway + Firestore + RAG. Run: `cd autoagents-agent && uv run pytest
 tests/post_deploy.py -v` (needs gcloud auth; reads secrets from Secret Manager).
-Covers: onboarding, WhatsApp→agent, email→agent, WhatsApp + email third-party relay
-(incl. a `+`-prefixed outbound), **unsolicited inbound dropped**, the **3h reply-window
-expiry** (→ "conversation closed", no relay), per-tenant long-term storage (RAG
+**11 tests.** Covers: onboarding, WhatsApp→agent, email→agent, **per-tenant agent-context
+injection** (codeword E2E — proves the admin panel's standing instructions reach the model),
+WhatsApp + email third-party relay (incl. a `+`-prefixed outbound), **unsolicited inbound
+dropped**, the **3h reply-window expiry on both channels** (→ "conversation closed", no
+relay; the email assertion matches on `"closed" in body` because the seeded outbound is also
+addressed to the contact), per-tenant long-term storage (RAG
 ingest+retrieve), and no-context-leak (distinct corpora, A's secret invisible to B,
 Firestore scoping). Simulates inbound with real
 auth (X-WA-Secret; Svix-signed Resend payloads — HMAC of `id.ts.body`), asserts on the
