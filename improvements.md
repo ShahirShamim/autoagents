@@ -23,27 +23,27 @@ Written so any coding model can implement a fix without re-analysing the repo.
 
 ## Fix index
 
-| ID | Title | Priority | Area | Effort |
-|----|-------|----------|------|--------|
-| F1 | Auth must fail closed when secrets are unset | Critical | gateway, admin | S |
-| F2 | Remove cross-tenant inbound-email fallback | Critical | gateway | S |
-| F3 | Rotate exposed secrets **[operator]** | Critical | ops | S |
-| F4 | Admin panel hardening (CSRF, open redirect, rate limit, replay, timing) | High | admin | M |
-| F5 | Unit tests for routing/ownership logic | High | gateway | M |
-| F6 | Transactional session pointer (`ensure_session`) | High | gateway | M |
-| F7 | Retries + dead-letter for message delivery | High | gateway, bridge | M |
-| F8 | Fix bridge creds-backup race | High | bridge | S |
-| F9 | Firestore indexes + bounded queries | Medium | gateway, admin, agent | M |
-| F10 | Cache the Vertex Agent Engine handle | Medium | gateway | S |
-| F11 | Delete dead code | Medium | all | S |
-| F12 | Bridge lockfile + reproducible install | Medium | bridge | S |
-| F13 | GitHub Actions CI | Medium | repo | S |
-| F14 | Container hardening (non-root, .dockerignore) | Medium | all Dockerfiles | S |
-| F15 | Fix packaging bugs in pyproject.toml | Medium | agent | S |
-| F16 | Input hardening (attachment size cap, jid validation, PII logs, RAG guard) | Medium | gateway, bridge, agent | S |
-| F17 | Documentation sweep (stale/contradictory docs) | Low | docs | M |
-| F18 | Root README + LICENSE + repo hygiene | Low | repo | S |
-| F19 | Remove PII defaults; register `send_whatsapp` over MCP | Low | gateway, admin, agent | S |
+| ID | Title | Priority | Area | Effort | Status |
+|----|-------|----------|------|--------|--------|
+| F1 | Auth must fail closed when secrets are unset | Critical | gateway, admin | S | ✅ done (53471f3) |
+| F2 | Remove cross-tenant inbound-email fallback | Critical | gateway | S | ✅ done (53471f3) |
+| F3 | Rotate exposed secrets **[operator]** | Critical | ops | S | open |
+| F4 | Admin panel hardening (CSRF, open redirect, rate limit, replay, timing) | High | admin | M | ◐ F4b + F4e done; CSRF, rate-limit, single-use links open |
+| F5 | Unit tests for routing/ownership logic | High | gateway | M | ◐ gateway/tests/ seeded (14 auth tests); routing/tenancy tests open |
+| F6 | Transactional session pointer (`ensure_session`) | High | gateway | M | open |
+| F7 | Retries + dead-letter for message delivery | High | gateway, bridge | M | open |
+| F8 | Fix bridge creds-backup race | High | bridge | S | open |
+| F9 | Firestore indexes + bounded queries | Medium | gateway, admin, agent | M | open |
+| F10 | Cache the Vertex Agent Engine handle | Medium | gateway | S | open |
+| F11 | Delete dead code | Medium | all | S | open |
+| F12 | Bridge lockfile + reproducible install | Medium | bridge | S | open |
+| F13 | GitHub Actions CI | Medium | repo | S | open |
+| F14 | Container hardening (non-root, .dockerignore) | Medium | all Dockerfiles | S | open |
+| F15 | Fix packaging bugs in pyproject.toml | Medium | agent | S | open |
+| F16 | Input hardening (attachment size cap, jid validation, PII logs, RAG guard) | Medium | gateway, bridge, agent | S | open |
+| F17 | Documentation sweep (stale/contradictory docs) | Low | docs | M | ✅ done (bfa0d73, 53471f3) |
+| F18 | Root README + LICENSE + repo hygiene | Low | repo | S | ◐ root README done; LICENSE open |
+| F19 | Remove PII defaults; register `send_whatsapp` over MCP | Low | gateway, admin, agent | S | open |
 
 ---
 
