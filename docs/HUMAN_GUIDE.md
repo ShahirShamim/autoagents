@@ -182,11 +182,18 @@ This creates an `app/` folder with `agent.py` (the agent), plus tests and config
 We edited `app/agent.py` to:
 - Use the model `gemini-3.5-flash`.
 - Add **tools** (small Python functions the agent can call): `send_email`,
-  `schedule_task`, `list_tasks`, `cancel_task`, `query_messages`,
-  `get_agent_state`, `set_agent_state`, `current_time`, `search_documents`,
-  `ingest_document`.
+  `send_whatsapp`, `schedule_task`, `list_tasks`, `cancel_task`, `query_messages`,
+  `get_agent_state`, `set_agent_state`, `current_time`, `web_search`,
+  `search_documents`, `ingest_document`.
 - Add **Memory Bank**: a `PreloadMemoryTool()` (loads relevant memories each turn)
   plus an `after_agent_callback` that saves the conversation to memory.
+
+> **SUPERSEDED — the memory wiring above was removed.** It never actually worked: the
+> deployed engine had no memory backend configured, so those two pieces sat dormant (and one
+> threw a background error in production). When we went multi-tenant, memory moved **into the
+> gateway**, which retrieves relevant facts before each turn and saves the conversation when a
+> session rotates. That's what let memory be kept separate per person. The agent itself no
+> longer has any memory code. Everything else in this section still describes the shipped agent.
 
 The tools live in `app/tools.py`. Config (project, bucket, sender email) lives in
 `app/config.py`, with local values in a `.env` file.
@@ -409,7 +416,7 @@ gcloud compute instances create-with-container autoagents-wa --zone=us-central1-
 | Agent Runtime sizing | cpu 1, memory 4Gi, min 1, max 10, concurrency 8, workers 1 |
 | Gateway sizing | memory 1Gi (Cloud Run defaults otherwise) |
 | Sender address | `assistant@jmkn.tech` |
-| WhatsApp method | Baileys (unofficial WhatsApp Web), dedicated number `+44 7340 926493` |
+| WhatsApp method | Baileys (unofficial WhatsApp Web). **One linked account per tenant** — each person links their own second/dedicated number via a self-service QR link. (`+44 7340 926493` was the original single shared number; it is now just tenant_0's.) |
 | WhatsApp VM | `autoagents-wa`, e2-micro, us-central1-a, static IP `136.114.229.113`, port 8080 |
 | WhatsApp image | `us-central1-docker.pkg.dev/autoagents-500500/autoagents/whatsapp-bridge:latest` |
 | WhatsApp secret | `whatsapp-bridge-secret` (guards `/send` + `/qr`) |
@@ -420,8 +427,8 @@ gcloud compute instances create-with-container autoagents-wa --zone=us-central1-
 
 ## 6. How to operate it
 
-- **Talk to it:** email `assistant@jmkn.tech`, or WhatsApp `+44 7340 926493`. Attach
-  images/PDF/audio/video freely on either channel.
+- **Talk to it:** email `assistant@jmkn.tech`, or WhatsApp the number **you linked** (each
+  tenant links their own — see §10). Attach images/PDF/audio/video freely on either channel.
 - **Admin commands** (from an allow-listed address — set by `ADMIN_EMAILS`):
   - `!status` — current state + how many tasks are due
   - `!pause` — keep logging but stop acting
@@ -431,8 +438,14 @@ gcloud compute instances create-with-container autoagents-wa --zone=us-central1-
   the invoice by Friday and summarize the replies." It creates tasks and works over time.
 
 ### WhatsApp operations
-- **Re-pair** (only if the session is lost): open `http://136.114.229.113:8080/qr?token=<secret>`
-  and scan again. Normally not needed — auth survives restarts via Cloud Storage.
+- **Re-link** (if a tenant's session drops): in the admin console, open the tenant and hit
+  **Send WhatsApp link** — they get an emailed magic link (`/link?token=…`, valid 24h) with a
+  live QR to scan from **Linked Devices** on their second WhatsApp account. The old
+  `http://<vm-ip>:8080/qr?token=<secret>` page is **retired** — that was the single-shared-number
+  flow and it exposed the bridge secret in a URL.
+- **You usually won't need to.** A liveness sweep runs every 5 minutes and emails the owner a
+  fresh link automatically when their session is confirmed down (two consecutive failed checks),
+  and a Monday-09:00 keep-alive message stops linked devices expiring from disuse.
 - **Restart the bridge:** `gcloud compute instances reset autoagents-wa --zone=us-central1-a`
   (it pulls `:latest` and reconnects from saved creds).
 - **Bridge health:** `curl http://136.114.229.113:8080/health` → `{"status":"ok","connected":true}`.

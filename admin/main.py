@@ -8,11 +8,12 @@ recent messages + tasks. Reads/writes the same Firestore the gateway/agent use.
 """
 from __future__ import annotations
 
+import hmac
 import html
 import logging
 
 import requests
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
@@ -30,7 +31,13 @@ log = logging.getLogger("admin")
 # everyone's session. Only ADMIN_EMAIL may request (and redeem) a magic link.
 # --------------------------------------------------------------------------- #
 def _signer(salt: str) -> URLSafeTimedSerializer:
-    key = config.MAGIC_SECRET or config.ADMIN_PASSWORD or "unset"
+    # No placeholder fallback. Signing with a known literal like "unset" would let
+    # anyone mint a valid session cookie offline and walk into the console — which
+    # is now on a public domain. A misconfigured deploy must refuse to serve auth.
+    key = config.MAGIC_SECRET or config.ADMIN_PASSWORD
+    if not key:
+        log.error("neither MAGIC_SECRET nor ADMIN_PASSWORD set — refusing to sign")
+        raise HTTPException(500, "server not configured")
     return URLSafeTimedSerializer(key, salt=salt)
 
 
@@ -345,8 +352,10 @@ def auth(token: str = "") -> Response:
 
 @app.post("/login/password")
 async def login_password(request: Request, password: str = Form("")) -> Response:
-    if config.ADMIN_PASSWORD and password == config.ADMIN_PASSWORD:
+    # compare_digest: a plain == leaks the password prefix-wise via response timing.
+    if config.ADMIN_PASSWORD and hmac.compare_digest(password, config.ADMIN_PASSWORD):
         return _set_session(_redirect("/"))
+    log.warning("break-glass password login failed")
     return _redirect("/login?err=1")
 
 

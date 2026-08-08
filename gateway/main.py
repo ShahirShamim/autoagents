@@ -11,6 +11,7 @@ Every inbound/outbound message is logged to Firestore. The agent run-state
 from __future__ import annotations
 
 import base64
+import hmac
 import html
 import json
 import logging
@@ -56,10 +57,15 @@ def _as_email(value: Any) -> str:
 
 
 def _verify_webhook(raw: bytes, headers: dict[str, str]) -> bool:
-    """Verify the Svix signature Resend attaches to webhooks."""
+    """Verify the Svix signature Resend attaches to webhooks.
+
+    Fails CLOSED when the secret is missing: an unsigned /inbound/email is an open
+    door to forged mail from any sender, so a misconfigured deploy must reject
+    traffic rather than trust it.
+    """
     if not config.RESEND_WEBHOOK_SECRET:
-        log.warning("RESEND_WEBHOOK_SECRET unset — skipping signature verification")
-        return True
+        log.error("RESEND_WEBHOOK_SECRET unset — rejecting inbound webhook")
+        return False
     try:
         from svix.webhooks import Webhook
 
@@ -334,9 +340,21 @@ async def inbound_email(request: Request) -> Response:
     email_id = data.get("email_id") or data.get("id") or ""
     full = clients.fetch_inbound_email(email_id) if email_id else {}
     if "received" in etype and not full.get("id"):
-        # Webhook id wasn't a retrievable inbound id — fall back to most recent.
-        email_id = clients.latest_inbound_id()
-        full = clients.fetch_inbound_email(email_id) if email_id else {}
+        # Webhook id wasn't retrievable. The old behaviour fell back to the globally
+        # most-recent inbound email — which under concurrent traffic could be a
+        # DIFFERENT TENANT'S mail, processed as this sender's message. Only accept
+        # the fallback when its sender matches this webhook's own metadata.
+        fb_id = clients.latest_inbound_id()
+        fb = clients.fetch_inbound_email(fb_id) if fb_id else {}
+        if fb.get("id") and _as_email(fb.get("from")) == _as_email(data.get("from")):
+            email_id, full = fb_id, fb
+        else:
+            log.error("inbound email %s not retrievable; processing metadata only", email_id)
+            clients.record_alert(
+                "inbound_email_unretrievable",
+                f"webhook id {email_id!r} not retrievable and fallback sender mismatched",
+                severity="warning",
+            )
     src = full or data
     log.info(
         "inbound email_id=%s full=%s payload_keys=%s data_keys=%s",
@@ -555,8 +573,27 @@ async def inbound_whatsapp(request: Request) -> Response:
 # --------------------------------------------------------------------------- #
 # Self-service WhatsApp linking (magic link → QR pairing on the bridge)
 # --------------------------------------------------------------------------- #
+def _require_tasks_token(request: Request) -> None:
+    """Gate the internal/scheduler routes.
+
+    Fails CLOSED: an unset TASKS_TOKEN previously skipped the check entirely, which
+    would leave /tasks/run and the /internal/* routes open to anyone. Compared with
+    compare_digest so a wrong token can't be recovered by timing.
+    """
+    if not config.TASKS_TOKEN:
+        log.error("TASKS_TOKEN unset — rejecting internal request")
+        raise HTTPException(status_code=503, detail="server not configured")
+    supplied = request.headers.get("x-tasks-token") or ""
+    if not hmac.compare_digest(supplied, config.TASKS_TOKEN):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
 def _link_serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(config.LINK_SECRET or "unset", salt="aa-walink")
+    # No fallback key: signing with a literal placeholder would let anyone mint a
+    # link token for any tenant and pair their own WhatsApp to that account.
+    if not config.LINK_SECRET:
+        raise HTTPException(500, "LINK_SECRET unset")
+    return URLSafeTimedSerializer(config.LINK_SECRET, salt="aa-walink")
 
 
 def _make_link_token(tenant_id: str) -> str:
@@ -691,8 +728,7 @@ async def internal_wa_link(request: Request, tenant_id: str) -> dict[str, Any]:
 
     Called by the admin "Send WhatsApp link" button. Returns the link too.
     """
-    if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
-        raise HTTPException(status_code=401, detail="unauthorized")
+    _require_tasks_token(request)
     if not tenancy.tenant_config(tenant_id):
         raise HTTPException(status_code=404, detail="unknown tenant")
     token = _make_link_token(tenant_id)
@@ -720,8 +756,7 @@ async def internal_wa_link(request: Request, tenant_id: str) -> dict[str, Any]:
 async def internal_ensure_corpus(request: Request, tenant_id: str) -> dict[str, Any]:
     """Token-gated: provision (or report) a tenant's RAG corpus. Used to backfill
     corpora and to surface provisioning errors."""
-    if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
-        raise HTTPException(status_code=401, detail="unauthorized")
+    _require_tasks_token(request)
     return {"tenant_id": tenant_id, "corpus": clients.ensure_tenant_corpus(tenant_id)}
 
 
@@ -784,8 +819,7 @@ def _wa_liveness_sweep() -> dict[str, int]:
 @app.post("/tasks/run")
 async def tasks_run(request: Request) -> dict[str, Any]:
     """Scheduler tick: execute any due tasks/reminders/followups."""
-    if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
-        raise HTTPException(status_code=401, detail="unauthorized")
+    _require_tasks_token(request)
 
     ran = 0
     skipped = 0
@@ -833,8 +867,7 @@ async def weekly_keepalive(request: Request) -> dict[str, Any]:
     """Weekly reassurance ping (Mon 9am Asia/Karachi via Cloud Scheduler): message
     each linked + connected tenant's owner that their agent is alive and waiting.
     Doubles as a keep-alive that exercises the WhatsApp socket."""
-    if config.TASKS_TOKEN and request.headers.get("x-tasks-token") != config.TASKS_TOKEN:
-        raise HTTPException(status_code=401, detail="unauthorized")
+    _require_tasks_token(request)
     sent = 0
     skipped = 0
     for snap in clients.db().collection(config.COL_TENANTS).where("status", "==", "active").stream():

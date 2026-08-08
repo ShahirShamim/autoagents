@@ -100,15 +100,19 @@ VERIFY: `rag.list_corpora()` returns the corpus; `search_documents()` returns co
 - `app/config.py`: PROJECT_ID, REGION, LLM=`gemini-3.5-flash`, ATTACHMENTS_BUCKET,
   SENDER_EMAIL, RESEND_API_KEY (env), RAG_LOCATION, RAG_CORPUS, ADMIN_EMAILS,
   Firestore collection names. ADMIN_EMAILS parser MUST split on `[;,]` (see PITFALLS).
-- `app/tools.py`: typed function tools, each with a docstring (ADK derives schema):
-  `send_email, schedule_task, list_tasks, cancel_task, query_messages,
-   get_agent_state, set_agent_state, current_time, search_documents, ingest_document`.
+- `app/tools.py`: typed function tools, each with a docstring (ADK derives schema).
+  **12 tools as shipped:** `send_email, send_whatsapp, schedule_task, list_tasks,
+  cancel_task, query_messages, get_agent_state, set_agent_state, current_time,
+  web_search, search_documents, ingest_document`. Every one reads `tenant_id`
+  (+ `rag_corpus`) from `ToolContext.state` and scopes its Firestore/RAG access to it.
   Firestore client lazy-init; `_now()` = UTC ISO. RAG tools lazy `vertexai.init(location=RAG_LOCATION)`.
-- `app/agent.py`: model `gemini-3.5-flash`; tools list = the 10 above + `PreloadMemoryTool()`;
-  `after_agent_callback=generate_memories_callback` where callback awaits
-  `callback_context.add_session_to_memory()`. Imports:
-  `from google.adk.tools.preload_memory_tool import PreloadMemoryTool`,
-  `from google.adk.agents.callback_context import CallbackContext`.
+- `app/agent.py`: model `gemini-3.5-flash`; tools list = the 12 above. **No memory wiring in
+  the agent.** The original build added `PreloadMemoryTool()` +
+  `after_agent_callback=generate_memories_callback`; both were **removed in multi-tenant
+  Phase 3** — they were dormant (the engine had no `contextSpec`) and one threw a background
+  error in prod. Long-term memory is now **orchestrated by the gateway**
+  (`clients._memory_facts` retrieves before the turn, `clients._store_memory` flushes on
+  session rotation), so it can be scoped to `user_id = tenant_id`. See §10 SESSION LIFECYCLE.
 - `app/mcp_server.py`: FastMCP registering the same tools (`uv sync --extra mcp`).
 - `.env`: GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION=global, GOOGLE_GENAI_USE_VERTEXAI=True,
   ATTACHMENTS_BUCKET, SENDER_EMAIL, ADMIN_EMAILS, RESEND_API_KEY, RAG_LOCATION, RAG_CORPUS.
@@ -343,7 +347,11 @@ AUTH_DIR, PORT.
 - Rotate a secret: `gcloud secrets versions add <name> --data-file=-`, then redeploy.
 - WhatsApp bridge: health `curl http://WA_IP:8080/health`; logs Cloud Logging
   `logName=~"cos_containers"`; restart `gcloud compute instances reset autoagents-wa --zone=us-central1-a`;
-  update code → rebuild+push image → reset. Re-pair only if creds lost: open `/qr?token=$WA`.
+  update code → rebuild+push image → reset (**by digest** — konlet caches `:latest`).
+  Re-link a tenant (creds lost / device expired): `POST /internal/wa-link/{tenant}` on the
+  gateway, or the admin console's **Send WhatsApp link** button — emails a 24h magic link.
+  The legacy `/qr?token=$WA` bridge page is superseded by §11 (it leaked the bridge secret
+  in a URL and only ever worked for one shared account).
 - Rotate `whatsapp-bridge-secret`: add a new version → recreate VM with new `WA_SECRET`
   container-env → redeploy gateway+agent. (It was exposed in chat via the `/qr` URL during pairing.)
 
